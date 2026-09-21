@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#123f3e" />
+    <title>Therapy Interaction Study</title>
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="#" id="home-link" aria-label="Patient profiles">
+        <span class="brand-mark" aria-hidden="true">T</span>
+        <span><strong>Therapy Interaction</strong><small>Expert study</small></span>
+      </a>
+      <div class="header-actions">
+        <span class="connection-status" id="connection-status"><i></i><span>Checking server</span></span>
+        <button class="text-button hidden" id="sign-out-button" type="button">Sign out</button>
+      </div>
+    </header>
+
+    <main>
+      <section class="view login-view" id="login-view">
+        <div class="login-card">
+          <p class="eyebrow">Study access</p>
+          <h1>Welcome</h1>
+          <p class="intro">Enter the codes provided by the research team.</p>
+          <form id="login-form">
+            <label>Participant code<input id="participant-code" autocomplete="username" maxlength="64" required /></label>
+            <label>Access code<input id="access-code" type="password" autocomplete="current-password" required /></label>
+            <p class="error hidden" id="login-error" role="alert"></p>
+            <button class="primary-button" id="login-button" type="submit">Continue</button>
+          </form>
+          <p class="privacy-note">Use only the simulated patient information provided in this study.</p>
+        </div>
+      </section>
+
+      <section class="view profiles-view hidden" id="profiles-view">
+        <div class="page-heading">
+          <div><p class="eyebrow">Patient roles</p><h1>Choose a patient</h1></div>
+          <p>Select a profile to open its six conversations.</p>
+        </div>
+        <div class="profile-grid" id="profile-grid"></div>
+      </section>
+
+      <section class="view study-view hidden" id="study-view">
+        <div class="study-heading">
+          <div>
+            <button class="back-button" id="back-button" type="button">&#8592; Patients</button>
+            <h1 id="study-patient-name">Patient</h1>
+            <p id="study-condition"></p>
+          </div>
+          <div class="study-actions">
+            <button class="secondary-button" id="profile-button" type="button">View patient profile</button>
+            <button class="secondary-button" id="finish-button" type="button">Finish patient</button>
+          </div>
+        </div>
+        <p class="study-note" id="study-note">Respond in character as the patient. You can move between conversations while replies wait in the queue.</p>
+        <div class="panel-grid" id="panel-grid"></div>
+      </section>
+    </main>
+
+    <dialog class="profile-dialog" id="profile-dialog">
+      <div class="dialog-header">
+        <div><p class="eyebrow">Your role</p><h2 id="modal-profile-name">Patient</h2></div>
+        <button class="close-button" id="close-profile-button" type="button" aria-label="Close profile">&times;</button>
+      </div>
+      <div class="profile-content">
+        <section><h3>Presenting situation</h3><p id="modal-summary"></p></section>
+        <section><h3>Current context</h3><p id="modal-context"></p></section>
+        <section><h3>Relevant history</h3><p class="pre-line" id="modal-history"></p></section>
+        <section><h3>Typical coping</h3><ul id="modal-coping"></ul></section>
+        <section><h3>Role guidance</h3><ul id="modal-guidance"></ul></section>
+      </div>
+    </dialog>
+
+    <div class="toast hidden" id="toast" role="status"></div>
+
+    <script src="./config.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>

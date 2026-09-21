@@ -1,0 +1,60 @@
+name: Deploy GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Prepare static site
+        env:
+          API_BASE_URL: ${{ secrets.API_BASE_URL }}
+        run: |
+          node <<'NODE'
+          const fs = require("fs");
+          const apiBase = String(process.env.API_BASE_URL || "").trim().replace(/\/$/, "");
+          if (!/^https:\/\/[^/]+$/i.test(apiBase)) {
+            throw new Error("Set the API_BASE_URL repository secret to the public HTTPS API origin.");
+          }
+          fs.cpSync("frontend", "_site", { recursive: true });
+          fs.writeFileSync(
+            "_site/config.js",
+            `window.CBT_STUDY_CONFIG = ${JSON.stringify({ apiBase }, null, 2)};\n`,
+          );
+          fs.writeFileSync("_site/.nojekyll", "");
+          NODE
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: _site
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
