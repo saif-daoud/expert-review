@@ -27,7 +27,7 @@ FastAPI + SQLite + one FIFO generation lane (cbt-live-api)
         +-- base env       / GPU 0: Prompting + ProAct, one shared Qwen
         +-- archer_env     / GPU 0: Archer
         +-- aria_env       / GPU 3: ARIA
-        +-- sweet_rl_env   / GPU 3: Sweet-RL
+        +-- sweet_rl       / GPU 3: Sweet-RL
         +-- API process             TOPAS static stub
 ```
 

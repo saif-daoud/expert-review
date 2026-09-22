@@ -31,7 +31,7 @@ RUNTIME_DEFAULTS = {
     "base": {"env": "base", "gpu": "0"},
     "archer": {"env": "archer_env", "gpu": "0"},
     "aria": {"env": "aria_env", "gpu": "3"},
-    "sweet_rl": {"env": "sweet_rl_env", "gpu": "3"},
+    "sweet_rl": {"env": "sweet_rl", "gpu": "3"},
 }
 
 

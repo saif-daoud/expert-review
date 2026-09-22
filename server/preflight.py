@@ -27,7 +27,7 @@ ENVIRONMENTS = {
     "base": os.getenv("STUDY_CONDA_ENV_BASE", "base"),
     "archer": os.getenv("STUDY_CONDA_ENV_ARCHER", "archer_env"),
     "aria": os.getenv("STUDY_CONDA_ENV_ARIA", "aria_env"),
-    "sweet_rl": os.getenv("STUDY_CONDA_ENV_SWEET_RL", "sweet_rl_env"),
+    "sweet_rl": os.getenv("STUDY_CONDA_ENV_SWEET_RL", "sweet_rl"),
 }
 
 REQUIRED_PATHS = {
