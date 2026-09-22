@@ -38,25 +38,79 @@
       <section class="view profiles-view hidden" id="profiles-view">
         <div class="page-heading">
           <div><p class="eyebrow">Patient roles</p><h1>Choose a patient</h1></div>
-          <p>Select a profile to open its six conversations.</p>
+        </div>
+        <div class="task-card">
+          <span class="task-number">Your task</span>
+          <p>Role-play the patient using the profile provided. You will speak with one therapist at a time, then score that session on all 11 CTRS items.</p>
         </div>
         <div class="profile-grid" id="profile-grid"></div>
       </section>
 
-      <section class="view study-view hidden" id="study-view">
-        <div class="study-heading">
+      <section class="view patient-view hidden" id="patient-view">
+        <button class="back-button" id="patient-back-button" type="button">&#8592; Patients</button>
+        <div class="patient-heading">
           <div>
-            <button class="back-button" id="back-button" type="button">&#8592; Patients</button>
-            <h1 id="study-patient-name">Patient</h1>
-            <p id="study-condition"></p>
+            <p class="eyebrow">Your patient role</p>
+            <h1 id="patient-name">Patient</h1>
+            <p id="patient-condition"></p>
+          </div>
+          <div class="patient-progress" id="patient-progress"></div>
+        </div>
+        <article class="patient-sheet">
+          <section class="profile-lead"><h2>Presenting situation</h2><p id="patient-summary"></p></section>
+          <div class="profile-columns">
+            <section><h2>Current context</h2><p id="patient-context"></p></section>
+            <section><h2>Relevant history</h2><p class="pre-line" id="patient-history"></p></section>
+            <section><h2>Typical coping</h2><ul id="patient-coping"></ul></section>
+            <section><h2>Role guidance</h2><ul id="patient-guidance"></ul></section>
+          </div>
+        </article>
+        <div class="patient-next">
+          <p id="patient-next-note"></p>
+          <button class="primary-button" id="begin-session-button" type="button">Begin session</button>
+        </div>
+      </section>
+
+      <section class="view session-view hidden" id="session-view">
+        <div class="session-heading">
+          <div>
+            <button class="back-button" id="session-back-button" type="button">&#8592; Patient profile</button>
+            <p class="eyebrow" id="session-progress">Session</p>
+            <h1 id="session-therapist">Therapist</h1>
           </div>
           <div class="study-actions">
-            <button class="secondary-button" id="profile-button" type="button">View patient profile</button>
-            <button class="secondary-button" id="finish-button" type="button">Finish session</button>
+            <button class="secondary-button" id="profile-button" type="button">Patient profile</button>
+            <button class="secondary-button" id="end-session-button" type="button">End session</button>
           </div>
         </div>
-        <p class="study-note" id="study-note">Respond in character as the patient. You can move between conversations while replies wait in the queue.</p>
-        <div class="panel-grid" id="panel-grid"></div>
+        <p class="study-note">Respond naturally in character as the patient. End the session when you are ready to rate the therapist.</p>
+        <div class="single-panel" id="panel-host"></div>
+      </section>
+
+      <section class="view rating-view hidden" id="rating-view">
+        <div class="rating-heading">
+          <div>
+            <p class="eyebrow" id="rating-progress">CTRS evaluation</p>
+            <h1 id="rating-title">Score the therapist</h1>
+          </div>
+          <button class="secondary-button" id="rating-profile-button" type="button">Patient profile</button>
+        </div>
+        <div class="rating-layout">
+          <aside class="transcript-card">
+            <div class="sticky-card-title"><h2>Session transcript</h2></div>
+            <div class="rating-transcript" id="rating-transcript"></div>
+          </aside>
+          <form class="ctrs-form" id="rating-form">
+            <div class="ctrs-intro">
+              <h2>Cognitive Therapy Rating Scale</h2>
+              <p>Score every item from 0 (Poor) to 6 (Excellent). Open the anchors when needed.</p>
+            </div>
+            <div id="rating-items"></div>
+            <label class="comments-label">Optional comments<textarea id="rating-comments" maxlength="4000" rows="4" placeholder="Add any comments about this session"></textarea></label>
+            <p class="error hidden" id="rating-error" role="alert"></p>
+            <button class="primary-button submit-rating" id="submit-rating-button" type="submit">Submit CTRS evaluation</button>
+          </form>
+        </div>
       </section>
     </main>
 
@@ -77,6 +131,7 @@
     <div class="toast hidden" id="toast" role="status"></div>
 
     <script src="./config.js"></script>
+    <script src="./ctrs.js"></script>
     <script src="./app.js"></script>
   </body>
 </html>

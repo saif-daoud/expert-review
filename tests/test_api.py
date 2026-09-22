@@ -1,14 +1,11 @@
 from __future__ import annotations
 
 import importlib
+import sqlite3
 import sys
 import time
-from pathlib import Path
 
 from fastapi.testclient import TestClient
-
-
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
 def load_client(monkeypatch, tmp_path):
@@ -18,7 +15,6 @@ def load_client(monkeypatch, tmp_path):
     monkeypatch.setenv("STUDY_ALLOWED_ORIGINS", "http://127.0.0.1:5500")
     monkeypatch.setenv("STUDY_SERVE_FRONTEND", "false")
     monkeypatch.setenv("STUDY_INFERENCE_MODE", "static")
-    monkeypatch.setenv("TOPAS_PROJECT_ROOT", str(PROJECT_ROOT))
     sys.modules.pop("server.app", None)
     module = importlib.import_module("server.app")
     return TestClient(module.app)
@@ -44,7 +40,7 @@ def wait_for_panel(client: TestClient, headers: dict[str, str], study_id: str, p
     raise AssertionError("Inference job did not finish")
 
 
-def test_full_six_panel_flow(monkeypatch, tmp_path):
+def test_sequential_six_session_ctrs_flow(monkeypatch, tmp_path):
     with load_client(monkeypatch, tmp_path) as client:
         health = client.get("/api/health").json()
         assert health["status"] == "ok"
@@ -61,10 +57,17 @@ def test_full_six_panel_flow(monkeypatch, tmp_path):
         assert cors.status_code == 200
         assert cors.headers["access-control-allow-origin"] == "http://127.0.0.1:5500"
 
-        headers = login(client, "EXPERT-01")
+        headers = login(client, "EXPERT-5834")
         profiles = client.get("/api/profiles", headers=headers).json()["profiles"]
-        assert len(profiles) == 5
-        assert set(profiles[0]) == {"id", "display_name", "condition", "short_description"}
+        assert len(profiles) == 20
+        assert set(profiles[0]) == {
+            "id",
+            "display_number",
+            "display_name",
+            "condition",
+            "short_description",
+        }
+        assert [profile["display_number"] for profile in profiles] == list(range(1, 21))
 
         created = client.post("/api/studies", headers=headers, json={"profile_id": profiles[0]["id"]})
         assert created.status_code == 200
@@ -72,6 +75,18 @@ def test_full_six_panel_flow(monkeypatch, tmp_path):
         assert len(study["panels"]) == 6
         assert [panel["label"] for panel in study["panels"]] == [f"Therapist {letter}" for letter in "ABCDEF"]
         assert "method_key" not in str(study)
+        assert study["completed_sessions"] == 0
+        assert study["total_sessions"] == 6
+        assert study["current_panel_id"] == study["panels"][0]["id"]
+        assert study["panels"][0]["status"] == "active"
+        assert all(panel["status"] == "locked" for panel in study["panels"][1:])
+
+        locked = client.post(
+            f"/api/studies/{study['id']}/panels/{study['panels'][1]['id']}/start",
+            headers=headers,
+            json={"client_request_id": "start-locked"},
+        )
+        assert locked.status_code == 409
 
         panel = study["panels"][0]
         started = client.post(
@@ -103,19 +118,212 @@ def test_full_six_panel_flow(monkeypatch, tmp_path):
         panel = client.get(f"/api/studies/{study['id']}", headers=headers).json()["study"]["panels"][0]
         assert len(panel["messages"]) == 3
 
+        premature_finish = client.post(f"/api/studies/{study['id']}/finish", headers=headers)
+        assert premature_finish.status_code == 409
+
+        ctrs_keys = {
+            "agenda",
+            "feedback",
+            "understanding",
+            "interpersonal_effectiveness",
+            "collaboration",
+            "pacing_time_use",
+            "guided_discovery",
+            "focusing_on_key_cognitions_behaviors",
+            "strategy_for_change",
+            "application_of_cbt_techniques",
+            "homework",
+        }
+
+        for index in range(6):
+            study = client.get(f"/api/studies/{study['id']}", headers=headers).json()["study"]
+            panel = next(item for item in study["panels"] if item["id"] == study["current_panel_id"])
+            if index > 0:
+                started = client.post(
+                    f"/api/studies/{study['id']}/panels/{panel['id']}/start",
+                    headers=headers,
+                    json={"client_request_id": f"start-{index}"},
+                )
+                assert started.status_code == 200
+                panel = wait_for_panel(client, headers, study["id"], panel["id"])
+
+            ended = client.post(
+                f"/api/studies/{study['id']}/panels/{panel['id']}/end",
+                headers=headers,
+                json={"client_request_id": f"end-{index}"},
+            )
+            assert ended.status_code == 200
+            ended_study = ended.json()["study"]
+            ended_panel = next(item for item in ended_study["panels"] if item["id"] == panel["id"])
+            assert ended_panel["status"] == "rating"
+            assert ended_panel["can_rate"] is True
+
+            if index == 0:
+                incomplete = client.post(
+                    f"/api/studies/{study['id']}/panels/{panel['id']}/rating",
+                    headers=headers,
+                    json={"scores": {"agenda": 4}, "comments": ""},
+                )
+                assert incomplete.status_code == 422
+
+            rated = client.post(
+                f"/api/studies/{study['id']}/panels/{panel['id']}/rating",
+                headers=headers,
+                json={"scores": {key: 3 for key in ctrs_keys}, "comments": "Reviewed."},
+            )
+            assert rated.status_code == 200
+            assert rated.json()["total_score"] == 33
+            study = rated.json()["study"]
+            assert study["completed_sessions"] == index + 1
+
+        assert study["status"] == "finished"
+        assert study["current_panel_id"] is None
+        assert all(panel["status"] == "completed" for panel in study["panels"])
+
         finished = client.post(f"/api/studies/{study['id']}/finish", headers=headers)
         assert finished.status_code == 200
-        assert finished.json()["study"]["status"] == "finished"
+        profiles = client.get("/api/profiles", headers=headers).json()["profiles"]
+        assert profiles[0]["study"]["completed_sessions"] == 6
 
 
 def test_studies_are_private_and_mapping_is_stable(monkeypatch, tmp_path):
     with load_client(monkeypatch, tmp_path) as client:
-        first = login(client, "EXPERT-01")
-        second = login(client, "EXPERT-02")
-        profile_id = client.get("/api/profiles", headers=first).json()["profiles"][0]["id"]
+        first = login(client, "EXPERT-5834")
+        second = login(client, "EXPERT-9271")
+        first_profiles = client.get("/api/profiles", headers=first).json()["profiles"]
+        second_profiles = client.get("/api/profiles", headers=second).json()["profiles"]
+        assert len(first_profiles) == len(second_profiles) == 20
+        assert {profile["id"] for profile in first_profiles}.isdisjoint(
+            profile["id"] for profile in second_profiles
+        )
+        app_module = sys.modules["server.app"]
+        first_sources = {
+            profile["source_id"]
+            for profile in app_module.PROFILES.values()
+            if profile["assignment_group"] == 1
+        }
+        second_sources = {
+            profile["source_id"]
+            for profile in app_module.PROFILES.values()
+            if profile["assignment_group"] == 2
+        }
+        assert len(first_sources) == len(second_sources) == 20
+        assert first_sources.isdisjoint(second_sources)
+        for group in (1, 2):
+            assigned = [
+                profile for profile in app_module.PROFILES.values() if profile["assignment_group"] == group
+            ]
+            assert sum(profile["condition"] == "Anxiety disorder" for profile in assigned) == 10
+            assert sum(profile["condition"] == "Depression" for profile in assigned) == 10
+
+        # IDs from the original ten-profile deployment remain attached to the
+        # same source cases, so existing studies do not change patient roles.
+        stable_ids = {
+            "patient-1": "patient_act_001",
+            "patient-2": "patient_act_002",
+            "patient-3": "patient_act_003",
+            "patient-4": "patient_act_021",
+            "patient-5": "patient_act_022",
+            "patient-6": "patient_act_004",
+            "patient-7": "patient_act_007",
+            "patient-8": "patient_act_016",
+            "patient-9": "patient_act_023",
+            "patient-10": "patient_act_026",
+        }
+        assert {
+            public_id: app_module.PROFILES[public_id]["source_id"] for public_id in stable_ids
+        } == stable_ids
+        profile_id = first_profiles[0]["id"]
         first_create = client.post("/api/studies", headers=first, json={"profile_id": profile_id}).json()["study"]
         second_create = client.post("/api/studies", headers=first, json={"profile_id": profile_id}).json()["study"]
         assert first_create["id"] == second_create["id"]
 
         forbidden = client.get(f"/api/studies/{first_create['id']}", headers=second)
         assert forbidden.status_code == 404
+
+        wrong_profile = client.post(
+            "/api/studies", headers=second, json={"profile_id": profile_id}
+        )
+        assert wrong_profile.status_code == 404
+
+        unknown_login = client.post(
+            "/api/auth/login",
+            json={"participant_code": "EXPERT-0000", "access_code": "test-access-code"},
+        )
+        assert unknown_login.status_code == 401
+
+
+def test_legacy_finished_study_is_migrated_for_sequential_ratings(monkeypatch, tmp_path):
+    database_path = tmp_path / "study.sqlite3"
+    connection = sqlite3.connect(database_path)
+    connection.executescript(
+        """
+        CREATE TABLE participants (
+            participant_code TEXT PRIMARY KEY,
+            created_at TEXT NOT NULL,
+            last_seen_at TEXT NOT NULL
+        );
+        CREATE TABLE studies (
+            id TEXT PRIMARY KEY,
+            participant_code TEXT NOT NULL,
+            profile_id TEXT NOT NULL,
+            status TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            finished_at TEXT,
+            UNIQUE (participant_code, profile_id)
+        );
+        CREATE TABLE study_panels (
+            id TEXT PRIMARY KEY,
+            study_id TEXT NOT NULL,
+            label TEXT NOT NULL,
+            method_key TEXT NOT NULL,
+            display_order INTEGER NOT NULL,
+            UNIQUE (study_id, label),
+            UNIQUE (study_id, method_key)
+        );
+        INSERT INTO participants VALUES ('EXPERT-5834', 'old', 'old');
+        INSERT INTO studies VALUES (
+            'legacy-study', 'EXPERT-5834', 'patient-1', 'finished', 'old', 'old', 'old'
+        );
+        """
+    )
+    for index, (label, method) in enumerate(
+        zip(
+            [f"Therapist {letter}" for letter in "ABCDEF"],
+            ["prompting", "proact", "archer", "aria", "sweet_rl", "topas"],
+        )
+    ):
+        connection.execute(
+            "INSERT INTO study_panels VALUES (?, 'legacy-study', ?, ?, ?)",
+            (f"legacy-panel-{index}", label, method, index),
+        )
+    connection.commit()
+    connection.close()
+
+    with load_client(monkeypatch, tmp_path) as client:
+        headers = login(client, "EXPERT-5834")
+        study = client.get("/api/studies/legacy-study", headers=headers).json()["study"]
+        assert study["status"] == "active"
+        assert study["finished_at"] is None
+        assert study["current_panel_id"] == "legacy-panel-0"
+
+    connection = sqlite3.connect(database_path)
+    columns = {row[1] for row in connection.execute("PRAGMA table_info(study_panels)")}
+    connection.close()
+    assert "ended_at" in columns
+
+
+def test_legacy_five_profile_environment_is_expanded(monkeypatch):
+    from server import profiles
+
+    monkeypatch.setenv(
+        "STUDY_EXPERT_1_PROFILE_IDS",
+        "patient_act_001,patient_act_002,patient_act_003,patient_act_021,patient_act_022",
+    )
+    monkeypatch.setenv(
+        "STUDY_EXPERT_2_PROFILE_IDS",
+        "patient_act_004,patient_act_007,patient_act_016,patient_act_023,patient_act_026",
+    )
+    assert len(profiles._selected_group(1)) == 20
+    assert len(profiles._selected_group(2)) == 20

@@ -182,3 +182,213 @@ input:focus, textarea:focus { border-color: #3a8882; box-shadow: 0 0 0 3px rgba(
   .study-actions button { flex: 1; font-size: 12px; }
   .chat-panel { height: 500px; }
 }
+
+/* Sequential patient, session, and CTRS flow */
+.task-card {
+  margin: -4px 0 24px;
+  padding: 17px 20px;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  border: 1px solid #bfd6d1;
+  border-radius: 16px;
+  background: rgba(229, 242, 239, .78);
+}
+.task-card p { margin: 0; color: #365c5a; line-height: 1.55; }
+.task-number {
+  flex: 0 0 auto;
+  padding: 7px 10px;
+  border-radius: 999px;
+  background: var(--teal);
+  color: white;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.patient-view { width: min(1180px, calc(100% - 40px)); }
+.patient-heading, .session-heading, .rating-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  margin: 8px 0 24px;
+}
+.patient-heading > div:first-child > p:last-child { margin: 8px 0 0; color: var(--muted); font-weight: 700; }
+.patient-progress {
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--paper);
+  color: var(--teal);
+  font-size: 13px;
+  font-weight: 800;
+}
+.patient-sheet {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: var(--paper);
+  box-shadow: 0 10px 35px rgba(22, 58, 57, .07);
+}
+.patient-sheet section { padding: 24px 28px; }
+.patient-sheet h2 { margin: 0 0 10px; font-family: inherit; font-size: 15px; color: #287b76; text-transform: uppercase; letter-spacing: .07em; }
+.patient-sheet p, .patient-sheet li { margin-top: 0; color: #405e5d; line-height: 1.65; }
+.profile-lead { border-bottom: 1px solid var(--line); background: linear-gradient(120deg, rgba(229, 242, 239, .76), transparent); }
+.profile-lead p { margin-bottom: 0; font-size: 17px; }
+.profile-columns { display: grid; grid-template-columns: 1fr 1fr; }
+.profile-columns section { border-bottom: 1px solid var(--line); }
+.profile-columns section:nth-child(odd) { border-right: 1px solid var(--line); }
+.profile-columns section:nth-last-child(-n + 2) { border-bottom: 0; }
+.profile-columns ul { margin: 0; padding-left: 20px; }
+.patient-next {
+  margin-top: 20px;
+  padding: 18px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  border-radius: 17px;
+  background: #edf4f2;
+}
+.patient-next p { margin: 0; color: var(--muted); font-weight: 700; }
+.patient-next .primary-button { min-width: 210px; }
+
+.session-view { width: min(1180px, calc(100% - 40px)); padding-top: 30px; }
+.session-heading { align-items: center; margin-bottom: 10px; }
+.session-heading h1, .rating-heading h1 { font-size: 38px; }
+.session-heading .eyebrow, .rating-heading .eyebrow { margin-bottom: 7px; }
+.single-panel { width: min(100%, 980px); margin: 0 auto; }
+.session-chat {
+  height: min(680px, calc(100vh - 250px));
+  min-height: 500px;
+  border-radius: 22px;
+  box-shadow: var(--shadow);
+}
+.session-chat .panel-header { min-height: 70px; padding: 14px 20px; }
+.session-chat .panel-avatar { width: 40px; height: 40px; }
+.session-chat .panel-header h2 { font-size: 17px; }
+.session-chat .messages { padding: 22px; gap: 16px; }
+.session-chat .message { max-width: 74%; }
+.session-chat .message-bubble { padding: 12px 15px; font-size: 15px; line-height: 1.55; }
+.session-chat .composer { padding: 13px; }
+.session-chat .composer textarea { min-height: 48px; max-height: 120px; padding: 13px 14px; font-size: 14px; }
+.session-chat .send-button { width: 48px; height: 48px; flex-basis: 48px; }
+
+.rating-view { width: min(1500px, calc(100% - 36px)); padding-top: 30px; }
+.rating-heading { align-items: center; margin-bottom: 22px; }
+.rating-layout {
+  display: grid;
+  grid-template-columns: minmax(370px, .82fr) minmax(590px, 1.18fr);
+  gap: 18px;
+  align-items: start;
+}
+.transcript-card, .ctrs-form {
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--paper);
+  box-shadow: 0 8px 28px rgba(22, 58, 57, .06);
+}
+.transcript-card {
+  position: sticky;
+  top: 94px;
+  height: calc(100vh - 116px);
+  min-height: 560px;
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: auto 1fr;
+}
+.sticky-card-title { padding: 19px 22px 15px; border-bottom: 1px solid var(--line); }
+.sticky-card-title h2 { font-family: inherit; font-size: 17px; }
+.rating-transcript { min-height: 0; overflow-y: auto; padding: 19px; display: flex; flex-direction: column; gap: 13px; }
+.rating-transcript .message { max-width: 90%; }
+.rating-transcript .message-bubble { font-size: 13px; }
+.ctrs-form { padding: 0; overflow: hidden; }
+.ctrs-intro { padding: 21px 24px 18px; border-bottom: 1px solid var(--line); }
+.ctrs-intro h2 { font-family: inherit; font-size: 19px; }
+.ctrs-intro p { margin: 7px 0 0; color: var(--muted); font-size: 13px; }
+.ctrs-part {
+  margin: 0;
+  padding: 11px 24px;
+  background: #edf4f2;
+  color: #2c706b;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  font-size: 11px;
+  font-weight: 900;
+}
+.ctrs-item { padding: 18px 24px; border-bottom: 1px solid #e3ebe8; }
+.ctrs-item-heading { display: flex; align-items: center; gap: 11px; margin-bottom: 13px; }
+.ctrs-item-heading > span {
+  width: 31px;
+  height: 31px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border-radius: 9px;
+  background: var(--teal-soft);
+  color: var(--teal);
+  font-size: 11px;
+  font-weight: 900;
+}
+.ctrs-item h3 { margin: 0; font-size: 16px; }
+.ctrs-note { margin: -3px 0 12px 42px; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.score-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
+.ctrs-form .score-option {
+  min-width: 0;
+  min-height: 54px;
+  margin: 0;
+  padding: 7px 3px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  border: 1px solid #ccdad7;
+  border-radius: 10px;
+  background: white;
+  text-align: center;
+  cursor: pointer;
+}
+.score-option:hover, .score-option:focus-within { border-color: #62a09a; background: #f5faf9; }
+.score-option.selected { border-color: var(--teal); background: var(--teal); color: white; }
+.score-option input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.score-option strong { font-size: 16px; line-height: 1; }
+.score-option small { min-height: 20px; display: grid; place-items: center; font-size: 9px; line-height: 1.05; font-weight: 600; }
+.anchor-details { margin-top: 10px; }
+.anchor-details summary { width: fit-content; color: var(--teal); font-size: 12px; font-weight: 800; cursor: pointer; }
+.anchor-grid { margin-top: 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.anchor-grid > div { padding: 10px; display: grid; grid-template-columns: 25px 1fr; gap: 8px; border-radius: 10px; background: #f4f7f5; }
+.anchor-grid strong { width: 25px; height: 25px; display: grid; place-items: center; border-radius: 7px; background: #dcece8; color: var(--teal); font-size: 11px; }
+.anchor-grid p { margin: 0; color: #496463; font-size: 11px; line-height: 1.45; }
+.ctrs-form .comments-label { margin: 20px 24px 14px; font-size: 13px; }
+.comments-label textarea { padding: 12px 14px; resize: vertical; }
+.ctrs-form > .error { margin: 0 24px 14px; }
+.submit-rating { float: right; margin: 0 24px 24px; }
+
+@media (max-width: 1050px) {
+  .rating-layout { grid-template-columns: 1fr; }
+  .transcript-card { position: static; height: 480px; min-height: 0; }
+}
+
+@media (max-width: 760px) {
+  .task-card { align-items: flex-start; flex-direction: column; gap: 10px; }
+  .patient-view, .session-view, .rating-view { width: min(100% - 24px, 620px); }
+  .patient-heading, .session-heading, .rating-heading { align-items: flex-start; flex-direction: column; }
+  .patient-progress { align-self: flex-start; }
+  .profile-columns { grid-template-columns: 1fr; }
+  .profile-columns section, .profile-columns section:nth-child(odd), .profile-columns section:nth-last-child(-n + 2) { border-right: 0; border-bottom: 1px solid var(--line); }
+  .profile-columns section:last-child { border-bottom: 0; }
+  .patient-next { align-items: stretch; flex-direction: column; }
+  .patient-next .primary-button { width: 100%; min-width: 0; }
+  .session-chat { height: calc(100vh - 280px); min-height: 470px; }
+  .session-chat .message { max-width: 91%; }
+  .score-grid { gap: 4px; }
+  .ctrs-item { padding: 16px 13px; }
+  .score-option small { display: none; }
+  .ctrs-form .score-option { min-height: 44px; }
+  .anchor-grid { grid-template-columns: 1fr; }
+  .ctrs-note { margin-left: 0; }
+  .transcript-card { height: 420px; }
+}

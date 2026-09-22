@@ -25,7 +25,14 @@ def main() -> int:
 
     totals = {
         table: connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
-        for table in ("participants", "studies", "study_panels", "panel_messages", "inference_jobs")
+        for table in (
+            "participants",
+            "studies",
+            "study_panels",
+            "panel_messages",
+            "inference_jobs",
+            "panel_ratings",
+        )
     }
     print("\nTotals")
     print("  " + "  ".join(f"{key}={value}" for key, value in totals.items()))
@@ -43,7 +50,9 @@ def main() -> int:
             """
             SELECT p.*,
                    (SELECT COUNT(*) FROM panel_messages AS m WHERE m.panel_id = p.id) AS message_count,
-                   (SELECT status FROM inference_jobs AS j WHERE j.panel_id = p.id ORDER BY sequence DESC LIMIT 1) AS job_status
+                   (SELECT status FROM inference_jobs AS j WHERE j.panel_id = p.id ORDER BY sequence DESC LIMIT 1) AS job_status,
+                   (SELECT total_score FROM panel_ratings AS r WHERE r.panel_id = p.id) AS ctrs_total,
+                   (SELECT submitted_at FROM panel_ratings AS r WHERE r.panel_id = p.id) AS rated_at
             FROM study_panels AS p
             WHERE p.study_id = ?
             ORDER BY p.display_order
@@ -55,7 +64,8 @@ def main() -> int:
             method = f" method={panel['method_key']}" if args.show_methods else ""
             print(
                 f"  {panel['label']}  id={panel['id']}{method} "
-                f"messages={panel['message_count']} latest_job={panel['job_status'] or '-'}"
+                f"messages={panel['message_count']} latest_job={panel['job_status'] or '-'} "
+                f"ended={panel['ended_at'] or '-'} ctrs={panel['ctrs_total'] if panel['ctrs_total'] is not None else '-'}"
             )
             if args.messages:
                 messages = connection.execute(
@@ -71,10 +81,12 @@ def main() -> int:
         SELECT s.id, s.participant_code, s.profile_id, s.status,
                COUNT(DISTINCT p.id) AS panels,
                COUNT(DISTINCT m.id) AS messages,
+               COUNT(DISTINCT r.id) AS ratings,
                s.created_at, s.updated_at
         FROM studies AS s
         LEFT JOIN study_panels AS p ON p.study_id = s.id
         LEFT JOIN panel_messages AS m ON m.panel_id = p.id
+        LEFT JOIN panel_ratings AS r ON r.panel_id = p.id
     """
     parameters: tuple[str, ...] = ()
     if args.participant:
@@ -88,7 +100,7 @@ def main() -> int:
     for row in rows:
         print(
             f"  {row['id']} participant={row['participant_code']} profile={row['profile_id']} "
-            f"status={row['status']} panels={row['panels']} messages={row['messages']}"
+            f"status={row['status']} panels={row['panels']} messages={row['messages']} ratings={row['ratings']}"
         )
     return 0
 

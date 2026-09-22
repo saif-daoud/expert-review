@@ -23,7 +23,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, StrictInt
 
 if __package__:
     from .inference_manager import InferenceManager
@@ -38,23 +38,10 @@ SERVER_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = SERVER_DIR.parent
 FRONTEND_DIR = PROJECT_DIR / "frontend"
 DEFAULT_DB_PATH = SERVER_DIR / "data" / "study.sqlite3"
-
-
-def _discover_topas_root() -> Path:
-    candidates = (SERVER_DIR.parent, *SERVER_DIR.parents)
-    return next(
-        (candidate for candidate in candidates if (candidate / "simulations" / "agents.py").is_file()),
-        SERVER_DIR.parent,
-    )
-
-
-DEFAULT_TOPAS_ROOT = _discover_topas_root()
-
 ACCESS_CODE = os.getenv("STUDY_ACCESS_CODE", "").strip()
 TOKEN_SECRET = os.getenv("STUDY_TOKEN_SECRET", "").strip()
 TOKEN_TTL_SECONDS = int(os.getenv("STUDY_TOKEN_TTL_SECONDS", str(12 * 60 * 60)))
 DATABASE_PATH = Path(os.getenv("STUDY_DB_PATH", str(DEFAULT_DB_PATH))).expanduser().resolve()
-TOPAS_PROJECT_ROOT = Path(os.getenv("TOPAS_PROJECT_ROOT", str(DEFAULT_TOPAS_ROOT))).expanduser().resolve()
 INFERENCE_MODE = os.getenv("STUDY_INFERENCE_MODE", "real").strip().lower()
 ALLOWED_ORIGINS = [
     origin.strip().rstrip("/")
@@ -67,7 +54,28 @@ PARTICIPANT_CODE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{1,63}$")
 DATABASE_LOCK = threading.RLock()
 METHOD_KEYS = ["prompting", "proact", "archer", "aria", "sweet_rl", "topas"]
 PANEL_LABELS = ["Therapist A", "Therapist B", "Therapist C", "Therapist D", "Therapist E", "Therapist F"]
+CTRS_KEYS = (
+    "agenda",
+    "feedback",
+    "understanding",
+    "interpersonal_effectiveness",
+    "collaboration",
+    "pacing_time_use",
+    "guided_discovery",
+    "focusing_on_key_cognitions_behaviors",
+    "strategy_for_change",
+    "application_of_cbt_techniques",
+    "homework",
+)
 PROFILES = load_profiles()
+EXPERT_CODES = (
+    os.getenv("STUDY_EXPERT_1_CODE", "EXPERT-5834").strip().upper(),
+    os.getenv("STUDY_EXPERT_2_CODE", "EXPERT-9271").strip().upper(),
+)
+PARTICIPANT_PROFILE_IDS = {
+    code: tuple(profile_id for profile_id, profile in PROFILES.items() if profile["assignment_group"] == group)
+    for group, code in enumerate(EXPERT_CODES, start=1)
+}
 
 
 class LoginRequest(BaseModel):
@@ -86,6 +94,11 @@ class MessageRequest(BaseModel):
 
 class ActionRequest(BaseModel):
     client_request_id: str
+
+
+class RatingRequest(BaseModel):
+    scores: dict[str, StrictInt]
+    comments: str = ""
 
 
 def utc_now() -> str:
@@ -123,6 +136,8 @@ def decode_token(token: str) -> str:
         participant_code = str(payload["participant_code"])
         if not PARTICIPANT_CODE_PATTERN.fullmatch(participant_code):
             raise ValueError("invalid participant")
+        if participant_code not in PARTICIPANT_PROFILE_IDS:
+            raise ValueError("unknown participant")
         return participant_code
     except (binascii.Error, KeyError, TypeError, UnicodeDecodeError, ValueError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=401, detail="Your session has expired. Please sign in again.") from exc
@@ -178,6 +193,7 @@ def initialize_database() -> None:
                 label TEXT NOT NULL,
                 method_key TEXT NOT NULL,
                 display_order INTEGER NOT NULL,
+                ended_at TEXT,
                 FOREIGN KEY (study_id) REFERENCES studies(id) ON DELETE CASCADE,
                 UNIQUE (study_id, label),
                 UNIQUE (study_id, method_key)
@@ -211,7 +227,40 @@ def initialize_database() -> None:
                 FOREIGN KEY (panel_id) REFERENCES study_panels(id) ON DELETE CASCADE,
                 UNIQUE (panel_id, client_request_id)
             );
+
+            CREATE TABLE IF NOT EXISTS panel_ratings (
+                id TEXT PRIMARY KEY,
+                panel_id TEXT NOT NULL UNIQUE,
+                participant_code TEXT NOT NULL,
+                scores_json TEXT NOT NULL,
+                total_score INTEGER NOT NULL CHECK (total_score BETWEEN 0 AND 66),
+                comments TEXT NOT NULL DEFAULT '',
+                submitted_at TEXT NOT NULL,
+                FOREIGN KEY (panel_id) REFERENCES study_panels(id) ON DELETE CASCADE,
+                FOREIGN KEY (participant_code) REFERENCES participants(participant_code)
+            );
             """
+        )
+        panel_columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(study_panels)").fetchall()
+        }
+        if "ended_at" not in panel_columns:
+            connection.execute("ALTER TABLE study_panels ADD COLUMN ended_at TEXT")
+        # Studies completed by the earlier parallel-chat UI have no CTRS
+        # ratings. Reopen them so the new sequential evaluation can resume.
+        connection.execute(
+            """
+            UPDATE studies
+            SET status = 'active', finished_at = NULL, updated_at = ?
+            WHERE status = 'finished'
+              AND EXISTS (
+                  SELECT 1
+                  FROM study_panels AS p
+                  LEFT JOIN panel_ratings AS r ON r.panel_id = p.id
+                  WHERE p.study_id = studies.id AND r.id IS NULL
+              )
+            """,
+            (utc_now(),),
         )
 
 
@@ -245,6 +294,43 @@ def _latest_job(connection: sqlite3.Connection, panel_id: str) -> sqlite3.Row | 
     ).fetchone()
 
 
+def _current_panel(connection: sqlite3.Connection, study_id: str) -> sqlite3.Row | None:
+    return connection.execute(
+        """
+        SELECT p.*
+        FROM study_panels AS p
+        LEFT JOIN panel_ratings AS r ON r.panel_id = p.id
+        WHERE p.study_id = ? AND r.id IS NULL
+        ORDER BY p.display_order
+        LIMIT 1
+        """,
+        (study_id,),
+    ).fetchone()
+
+
+def _require_current_panel(
+    connection: sqlite3.Connection, study: sqlite3.Row, panel: sqlite3.Row
+) -> None:
+    current = _current_panel(connection, study["id"])
+    if current is None or current["id"] != panel["id"]:
+        raise HTTPException(
+            status_code=409,
+            detail="Complete the current therapist session and CTRS rating first.",
+        )
+
+
+def _validated_rating(payload: RatingRequest) -> tuple[dict[str, int], str]:
+    if set(payload.scores) != set(CTRS_KEYS):
+        raise HTTPException(status_code=422, detail="A score is required for all 11 CTRS items.")
+    scores = {key: int(payload.scores[key]) for key in CTRS_KEYS}
+    if any(score < 0 or score > 6 for score in scores.values()):
+        raise HTTPException(status_code=422, detail="Each CTRS score must be between 0 and 6.")
+    comments = payload.comments.strip()
+    if len(comments) > 4000:
+        raise HTTPException(status_code=422, detail="Comments cannot exceed 4,000 characters.")
+    return scores, comments
+
+
 def _queue_position(connection: sqlite3.Connection, job: sqlite3.Row) -> int | None:
     if job["status"] == "running":
         return 0
@@ -273,6 +359,19 @@ def serialize_job(connection: sqlite3.Connection, job: sqlite3.Row | None) -> di
 
 def serialize_study(connection: sqlite3.Connection, study: sqlite3.Row) -> dict:
     profile = PROFILES[study["profile_id"]]
+    current = _current_panel(connection, study["id"])
+    current_panel_id = current["id"] if current is not None and study["status"] == "active" else None
+    completed_sessions = int(
+        connection.execute(
+            """
+            SELECT COUNT(*)
+            FROM panel_ratings AS r
+            JOIN study_panels AS p ON p.id = r.panel_id
+            WHERE p.study_id = ?
+            """,
+            (study["id"],),
+        ).fetchone()[0]
+    )
     panels = []
     for panel in connection.execute(
         "SELECT * FROM study_panels WHERE study_id = ? ORDER BY display_order",
@@ -287,19 +386,63 @@ def serialize_study(connection: sqlite3.Connection, study: sqlite3.Row) -> dict:
         ]
         job = _latest_job(connection, panel["id"])
         pending = job is not None and job["status"] in {"queued", "running"}
+        rating = connection.execute(
+            "SELECT scores_json, total_score, comments, submitted_at FROM panel_ratings WHERE panel_id = ?",
+            (panel["id"],),
+        ).fetchone()
+        is_current = panel["id"] == current_panel_id
+        if rating is not None:
+            panel_status = "completed"
+        elif is_current and panel["ended_at"]:
+            panel_status = "rating"
+        elif is_current:
+            panel_status = "active"
+        else:
+            panel_status = "locked"
         panels.append(
             {
                 "id": panel["id"],
                 "label": panel["label"],
+                "display_order": panel["display_order"],
+                "status": panel_status,
+                "is_current": is_current,
+                "ended_at": panel["ended_at"],
                 "messages": messages,
                 "job": serialize_job(connection, job),
-                "can_start": study["status"] == "active" and not messages and not pending,
+                "rating": (
+                    {
+                        "scores": json.loads(rating["scores_json"]),
+                        "total_score": rating["total_score"],
+                        "comments": rating["comments"],
+                        "submitted_at": rating["submitted_at"],
+                    }
+                    if rating is not None
+                    else None
+                ),
+                "can_start": (
+                    study["status"] == "active"
+                    and is_current
+                    and not panel["ended_at"]
+                    and not messages
+                    and not pending
+                ),
                 "can_send": (
                     study["status"] == "active"
+                    and is_current
+                    and not panel["ended_at"]
                     and bool(messages)
                     and messages[-1]["role"] == "therapist"
                     and not pending
                 ),
+                "can_end": (
+                    study["status"] == "active"
+                    and is_current
+                    and not panel["ended_at"]
+                    and bool(messages)
+                    and messages[-1]["role"] == "therapist"
+                    and not pending
+                ),
+                "can_rate": study["status"] == "active" and is_current and bool(panel["ended_at"]),
             }
         )
     return {
@@ -307,6 +450,9 @@ def serialize_study(connection: sqlite3.Connection, study: sqlite3.Row) -> dict:
         "status": study["status"],
         "profile": public_profile(profile),
         "panels": panels,
+        "current_panel_id": current_panel_id,
+        "completed_sessions": completed_sessions,
+        "total_sessions": len(PANEL_LABELS),
         "created_at": study["created_at"],
         "updated_at": study["updated_at"],
         "finished_at": study["finished_at"],
@@ -354,7 +500,6 @@ def _enqueue_job(
 INFERENCE_MANAGER = InferenceManager(
     database_path=DATABASE_PATH,
     server_dir=SERVER_DIR,
-    project_root=TOPAS_PROJECT_ROOT,
     mode=INFERENCE_MODE,
 )
 
@@ -368,6 +513,8 @@ async def lifespan(_: FastAPI):
         raise RuntimeError("STUDY_TOKEN_SECRET is required and must contain at least 32 characters.")
     if INFERENCE_MODE not in {"real", "static"}:
         raise RuntimeError("STUDY_INFERENCE_MODE must be 'real' or 'static'.")
+    if len(set(EXPERT_CODES)) != 2 or not all(PARTICIPANT_CODE_PATTERN.fullmatch(code) for code in EXPERT_CODES):
+        raise RuntimeError("The two configured expert codes must be distinct valid participant codes.")
     INFERENCE_MANAGER.start()
     try:
         yield
@@ -412,12 +559,14 @@ def health() -> dict:
 
 @app.post("/api/auth/login")
 def login(payload: LoginRequest) -> dict:
-    participant_code = payload.participant_code.strip()
+    participant_code = payload.participant_code.strip().upper()
     if not PARTICIPANT_CODE_PATTERN.fullmatch(participant_code):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Participant code must contain 2-64 letters, numbers, dots, underscores, or hyphens.",
         )
+    if participant_code not in PARTICIPANT_PROFILE_IDS:
+        raise HTTPException(status_code=401, detail="The participant code is incorrect.")
     if not hmac.compare_digest(payload.access_code, ACCESS_CODE):
         raise HTTPException(status_code=401, detail="The access code is incorrect.")
     now = utc_now()
@@ -439,19 +588,34 @@ def login(payload: LoginRequest) -> dict:
 def list_profiles(participant_code: str = Depends(require_participant)) -> dict:
     with database() as connection:
         existing = {
-            row["profile_id"]: {"id": row["id"], "status": row["status"]}
+            row["profile_id"]: {
+                "id": row["id"],
+                "status": row["status"],
+                "completed_sessions": int(row["completed_sessions"]),
+                "total_sessions": len(PANEL_LABELS),
+            }
             for row in connection.execute(
-                "SELECT id, profile_id, status FROM studies WHERE participant_code = ?",
+                """
+                SELECT s.id, s.profile_id, s.status, COUNT(r.id) AS completed_sessions
+                FROM studies AS s
+                LEFT JOIN study_panels AS p ON p.study_id = s.id
+                LEFT JOIN panel_ratings AS r ON r.panel_id = p.id
+                WHERE s.participant_code = ?
+                GROUP BY s.id, s.profile_id, s.status
+                """,
                 (participant_code,),
             ).fetchall()
         }
-    return {"profiles": [profile_card(profile, existing.get(public_id)) for public_id, profile in PROFILES.items()]}
+    allowed_ids = PARTICIPANT_PROFILE_IDS[participant_code]
+    return {
+        "profiles": [profile_card(PROFILES[profile_id], existing.get(profile_id)) for profile_id in allowed_ids]
+    }
 
 
 @app.post("/api/studies")
 def create_study(payload: StudyRequest, participant_code: str = Depends(require_participant)) -> dict:
     profile_id = payload.profile_id.strip()
-    if profile_id not in PROFILES:
+    if profile_id not in PARTICIPANT_PROFILE_IDS[participant_code]:
         raise HTTPException(status_code=404, detail="Patient profile not found.")
     now = utc_now()
     with DATABASE_LOCK, database() as connection:
@@ -503,6 +667,10 @@ def start_panel(
         if study["status"] != "active":
             connection.rollback()
             raise HTTPException(status_code=409, detail="This patient study is finished.")
+        _require_current_panel(connection, study, panel)
+        if panel["ended_at"]:
+            connection.rollback()
+            raise HTTPException(status_code=409, detail="This session is ready for its CTRS rating.")
         duplicate = connection.execute(
             "SELECT * FROM inference_jobs WHERE panel_id = ? AND client_request_id = ?",
             (panel_id, request_id),
@@ -551,6 +719,10 @@ def send_message(
         if study["status"] != "active":
             connection.rollback()
             raise HTTPException(status_code=409, detail="This patient study is finished.")
+        _require_current_panel(connection, study, panel)
+        if panel["ended_at"]:
+            connection.rollback()
+            raise HTTPException(status_code=409, detail="This session is ready for its CTRS rating.")
         if connection.execute(
             "SELECT 1 FROM inference_jobs WHERE panel_id = ? AND status IN ('queued', 'running')", (panel_id,)
         ).fetchone():
@@ -592,6 +764,10 @@ def retry_panel(
         if study["status"] != "active":
             connection.rollback()
             raise HTTPException(status_code=409, detail="This patient study is finished.")
+        _require_current_panel(connection, study, panel)
+        if panel["ended_at"]:
+            connection.rollback()
+            raise HTTPException(status_code=409, detail="This session is ready for its CTRS rating.")
         latest_job = _latest_job(connection, panel_id)
         if latest_job is None or latest_job["status"] != "failed":
             connection.rollback()
@@ -603,24 +779,133 @@ def retry_panel(
     return {"job": result}
 
 
+@app.post("/api/studies/{study_id}/panels/{panel_id}/end")
+def end_panel(
+    study_id: str,
+    panel_id: str,
+    payload: ActionRequest,
+    participant_code: str = Depends(require_participant),
+) -> dict:
+    _validate_request_id(payload.client_request_id)
+    now = utc_now()
+    with DATABASE_LOCK, database() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        study, panel = get_panel(connection, study_id, panel_id, participant_code)
+        if study["status"] != "active":
+            connection.rollback()
+            raise HTTPException(status_code=409, detail="This patient study is finished.")
+        _require_current_panel(connection, study, panel)
+        if not panel["ended_at"]:
+            pending = connection.execute(
+                "SELECT 1 FROM inference_jobs WHERE panel_id = ? AND status IN ('queued', 'running')",
+                (panel_id,),
+            ).fetchone()
+            latest = connection.execute(
+                "SELECT role FROM panel_messages WHERE panel_id = ? ORDER BY id DESC LIMIT 1",
+                (panel_id,),
+            ).fetchone()
+            if pending:
+                connection.rollback()
+                raise HTTPException(status_code=409, detail="Wait for the therapist response before ending.")
+            if latest is None or latest["role"] != "therapist":
+                connection.rollback()
+                raise HTTPException(status_code=409, detail="Start the session before ending it.")
+            connection.execute("UPDATE study_panels SET ended_at = ? WHERE id = ?", (now, panel_id))
+            connection.execute("UPDATE studies SET updated_at = ? WHERE id = ?", (now, study_id))
+        connection.commit()
+        study = get_study(connection, study_id, participant_code)
+        result = serialize_study(connection, study)
+    return {"study": result}
+
+
+@app.post("/api/studies/{study_id}/panels/{panel_id}/rating")
+def rate_panel(
+    study_id: str,
+    panel_id: str,
+    payload: RatingRequest,
+    participant_code: str = Depends(require_participant),
+) -> dict:
+    scores, comments = _validated_rating(payload)
+    now = utc_now()
+    with DATABASE_LOCK, database() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        study, panel = get_panel(connection, study_id, panel_id, participant_code)
+        existing = connection.execute(
+            "SELECT total_score FROM panel_ratings WHERE panel_id = ?", (panel_id,)
+        ).fetchone()
+        if existing is not None:
+            connection.commit()
+            study = get_study(connection, study_id, participant_code)
+            return {"study": serialize_study(connection, study), "total_score": existing["total_score"]}
+        if study["status"] != "active":
+            connection.rollback()
+            raise HTTPException(status_code=409, detail="This patient study is finished.")
+        _require_current_panel(connection, study, panel)
+        if not panel["ended_at"]:
+            connection.rollback()
+            raise HTTPException(status_code=409, detail="End the therapist session before submitting its rating.")
+        total_score = sum(scores.values())
+        connection.execute(
+            """
+            INSERT INTO panel_ratings(
+                id, panel_id, participant_code, scores_json, total_score, comments, submitted_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                str(uuid.uuid4()),
+                panel_id,
+                participant_code,
+                json.dumps(scores, separators=(",", ":")),
+                total_score,
+                comments,
+                now,
+            ),
+        )
+        completed = int(
+            connection.execute(
+                """
+                SELECT COUNT(*)
+                FROM panel_ratings AS r
+                JOIN study_panels AS p ON p.id = r.panel_id
+                WHERE p.study_id = ?
+                """,
+                (study_id,),
+            ).fetchone()[0]
+        )
+        if completed == len(PANEL_LABELS):
+            connection.execute(
+                "UPDATE studies SET status = 'finished', finished_at = ?, updated_at = ? WHERE id = ?",
+                (now, now, study_id),
+            )
+        else:
+            connection.execute("UPDATE studies SET updated_at = ? WHERE id = ?", (now, study_id))
+        connection.commit()
+        study = get_study(connection, study_id, participant_code)
+        result = serialize_study(connection, study)
+    return {"study": result, "total_score": total_score}
+
+
 @app.post("/api/studies/{study_id}/finish")
 def finish_study(study_id: str, participant_code: str = Depends(require_participant)) -> dict:
     now = utc_now()
     with DATABASE_LOCK, database() as connection:
         connection.execute("BEGIN IMMEDIATE")
         study = get_study(connection, study_id, participant_code)
-        pending = connection.execute(
+        remaining = connection.execute(
             """
-            SELECT 1 FROM inference_jobs AS j
-            JOIN study_panels AS p ON p.id = j.panel_id
-            WHERE p.study_id = ? AND j.status IN ('queued', 'running')
-            LIMIT 1
+            SELECT COUNT(*)
+            FROM study_panels AS p
+            LEFT JOIN panel_ratings AS r ON r.panel_id = p.id
+            WHERE p.study_id = ? AND r.id IS NULL
             """,
             (study_id,),
-        ).fetchone()
-        if pending:
+        ).fetchone()[0]
+        if remaining:
             connection.rollback()
-            raise HTTPException(status_code=409, detail="Wait for queued therapist responses before finishing.")
+            raise HTTPException(
+                status_code=409,
+                detail="Complete and rate all six therapist sessions before finishing this patient.",
+            )
         if study["status"] == "active":
             connection.execute(
                 "UPDATE studies SET status = 'finished', finished_at = ?, updated_at = ? WHERE id = ?",

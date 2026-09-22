@@ -5,3 +5,4 @@ __pycache__/
 server/data/*.sqlite3
 server/data/*.sqlite3-*
 logs/
+*.tar.gz

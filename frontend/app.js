@@ -2,6 +2,8 @@ const config = window.CBT_STUDY_CONFIG || {};
 const apiBase = String(config.apiBase || "").trim().replace(/\/$/, "");
 const hasRemoteApi = /^https:\/\/[^/]+/i.test(apiBase);
 const usesNgrok = hasRemoteApi && /(^|\.)ngrok(-free)?\.(app|dev)$/i.test(new URL(apiBase).hostname);
+const ctrsScale = window.CTRS_SCALE || [];
+const ctrsRubric = window.CTRS_RUBRIC || [];
 
 const storageKeys = { token: "cbt-live/token", participant: "cbt-live/participant" };
 const state = {
@@ -9,8 +11,10 @@ const state = {
   participant: sessionStorage.getItem(storageKeys.participant) || "",
   profiles: [],
   study: null,
+  view: "login",
   pollTimer: null,
   toastTimer: null,
+  ratingPanelId: null,
   pendingActions: new Set()
 };
 
@@ -18,7 +22,9 @@ const el = {
   views: {
     login: document.getElementById("login-view"),
     profiles: document.getElementById("profiles-view"),
-    study: document.getElementById("study-view")
+    patient: document.getElementById("patient-view"),
+    session: document.getElementById("session-view"),
+    rating: document.getElementById("rating-view")
   },
   connection: document.getElementById("connection-status"),
   loginForm: document.getElementById("login-form"),
@@ -29,13 +35,32 @@ const el = {
   signOut: document.getElementById("sign-out-button"),
   home: document.getElementById("home-link"),
   profileGrid: document.getElementById("profile-grid"),
-  back: document.getElementById("back-button"),
-  studyName: document.getElementById("study-patient-name"),
-  studyCondition: document.getElementById("study-condition"),
-  studyNote: document.getElementById("study-note"),
-  panelGrid: document.getElementById("panel-grid"),
+  patientBack: document.getElementById("patient-back-button"),
+  patientName: document.getElementById("patient-name"),
+  patientCondition: document.getElementById("patient-condition"),
+  patientProgress: document.getElementById("patient-progress"),
+  patientSummary: document.getElementById("patient-summary"),
+  patientContext: document.getElementById("patient-context"),
+  patientHistory: document.getElementById("patient-history"),
+  patientCoping: document.getElementById("patient-coping"),
+  patientGuidance: document.getElementById("patient-guidance"),
+  patientNextNote: document.getElementById("patient-next-note"),
+  beginSession: document.getElementById("begin-session-button"),
+  sessionBack: document.getElementById("session-back-button"),
+  sessionProgress: document.getElementById("session-progress"),
+  sessionTherapist: document.getElementById("session-therapist"),
   profileButton: document.getElementById("profile-button"),
-  finishButton: document.getElementById("finish-button"),
+  endSession: document.getElementById("end-session-button"),
+  panelHost: document.getElementById("panel-host"),
+  ratingProgress: document.getElementById("rating-progress"),
+  ratingTitle: document.getElementById("rating-title"),
+  ratingProfileButton: document.getElementById("rating-profile-button"),
+  ratingTranscript: document.getElementById("rating-transcript"),
+  ratingForm: document.getElementById("rating-form"),
+  ratingItems: document.getElementById("rating-items"),
+  ratingComments: document.getElementById("rating-comments"),
+  ratingError: document.getElementById("rating-error"),
+  submitRating: document.getElementById("submit-rating-button"),
   profileDialog: document.getElementById("profile-dialog"),
   closeProfile: document.getElementById("close-profile-button"),
   modalName: document.getElementById("modal-profile-name"),
@@ -52,8 +77,10 @@ function requestId() {
 }
 
 function showView(name) {
+  state.view = name;
   Object.entries(el.views).forEach(([key, node]) => node.classList.toggle("hidden", key !== name));
   el.signOut.classList.toggle("hidden", !state.token);
+  window.scrollTo({ top: 0, behavior: "instant" });
 }
 
 function setConnection(mode, text) {
@@ -114,15 +141,16 @@ function signOut() {
   state.participant = "";
   state.profiles = [];
   state.study = null;
+  state.ratingPanelId = null;
   state.pendingActions.clear();
   sessionStorage.removeItem(storageKeys.token);
   sessionStorage.removeItem(storageKeys.participant);
   el.access.value = "";
-  el.panelGrid.replaceChildren();
+  el.panelHost.replaceChildren();
   showView("login");
 }
 
-async function handleAuthenticatedError(error) {
+function handleAuthenticatedError(error) {
   if (error.status === 401) {
     signOut();
     showToast("Your sign-in expired. Please enter your codes again.", true);
@@ -131,8 +159,31 @@ async function handleAuthenticatedError(error) {
   showToast(error.message, true);
 }
 
+function escapeHtml(value) {
+  const node = document.createElement("div");
+  node.textContent = String(value ?? "");
+  return node.innerHTML;
+}
+
 function profileNumber(profile) {
-  return String(Number(profile.id.split("-").pop()) || "").padStart(2, "0");
+  return String(Number(profile.display_number) || "").padStart(2, "0");
+}
+
+function currentPanel() {
+  return state.study?.panels.find(panel => panel.id === state.study.current_panel_id) || null;
+}
+
+function sessionPosition(panel) {
+  return Number(panel?.display_order ?? state.study?.completed_sessions ?? 0) + 1;
+}
+
+function fillList(node, values) {
+  node.replaceChildren();
+  for (const value of values || []) {
+    const item = document.createElement("li");
+    item.textContent = value;
+    node.appendChild(item);
+  }
 }
 
 function renderProfiles() {
@@ -141,14 +192,20 @@ function renderProfiles() {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "patient-card";
-    const statusText = profile.study?.status === "finished" ? "Completed" : profile.study ? "In progress" : "Not started";
-    const actionText = profile.study?.status === "finished" ? "Review conversations" : profile.study ? "Continue" : "Open profile";
+    const completed = profile.study?.completed_sessions || 0;
+    const total = profile.study?.total_sessions || 6;
+    const statusText = profile.study?.status === "finished"
+      ? "Completed"
+      : profile.study
+        ? `${completed} of ${total} sessions rated`
+        : "Not started";
+    const actionText = profile.study ? "View profile" : "Open profile";
     button.innerHTML = `
       <span class="patient-number">${profileNumber(profile)}</span>
       <h2>${escapeHtml(profile.display_name)}</h2>
       <span class="condition">${escapeHtml(profile.condition)}</span>
       <p>${escapeHtml(profile.short_description)}</p>
-      <span class="study-state">${statusText}</span>
+      <span class="study-state">${escapeHtml(statusText)}</span>
       <span class="card-action">${actionText} &rarr;</span>`;
     button.addEventListener("click", () => openPatient(profile));
     el.profileGrid.appendChild(button);
@@ -174,28 +231,54 @@ async function openPatient(profile) {
       body: JSON.stringify({ profile_id: profile.id })
     });
     state.study = payload.study;
-    el.panelGrid.replaceChildren();
-    renderStudy();
-    showView("study");
-    schedulePoll();
+    state.ratingPanelId = null;
+    showPatientProfile();
   } catch (error) {
     handleAuthenticatedError(error);
   }
 }
 
-function fillList(node, values) {
-  node.replaceChildren();
-  for (const value of values || []) {
-    const item = document.createElement("li");
-    item.textContent = value;
-    node.appendChild(item);
+function populatePatientProfile() {
+  const profile = state.study?.profile;
+  if (!profile) return;
+  el.patientName.textContent = profile.display_name;
+  el.patientCondition.textContent = profile.condition;
+  el.patientSummary.textContent = profile.summary;
+  el.patientContext.textContent = profile.current_context;
+  el.patientHistory.textContent = profile.relevant_history;
+  fillList(el.patientCoping, profile.coping_strategies);
+  fillList(el.patientGuidance, profile.role_guidance);
+}
+
+function showPatientProfile() {
+  clearPoll();
+  if (!state.study) return loadProfiles();
+  populatePatientProfile();
+  const study = state.study;
+  const panel = currentPanel();
+  el.patientProgress.textContent = `${study.completed_sessions} of ${study.total_sessions} sessions rated`;
+  if (study.status === "finished" || !panel) {
+    el.patientNextNote.textContent = "All therapist sessions and CTRS evaluations are complete for this patient.";
+    el.beginSession.classList.add("hidden");
+  } else {
+    const position = sessionPosition(panel);
+    el.beginSession.classList.remove("hidden");
+    el.patientNextNote.textContent = `Next: session ${position} of ${study.total_sessions}`;
+    if (panel.status === "rating") {
+      el.beginSession.textContent = `Score ${panel.label}`;
+    } else if (panel.messages.length || panel.job) {
+      el.beginSession.textContent = `Continue with ${panel.label}`;
+    } else {
+      el.beginSession.textContent = `Begin with ${panel.label}`;
+    }
   }
+  showView("patient");
 }
 
 function openProfileDialog() {
   const profile = state.study?.profile;
   if (!profile) return;
-  el.modalName.textContent = `${profile.display_name} · ${profile.condition}`;
+  el.modalName.textContent = `${profile.display_name} - ${profile.condition}`;
   el.modalSummary.textContent = profile.summary;
   el.modalContext.textContent = profile.current_context;
   el.modalHistory.textContent = profile.relevant_history;
@@ -205,11 +288,10 @@ function openProfileDialog() {
 }
 
 function panelStatus(panel) {
-  if (state.study.status === "finished") return ["Finished", ""];
   if (panel.job?.status === "queued") {
     return [`Queued${panel.job.queue_position ? ` #${panel.job.queue_position}` : ""}`, "busy"];
   }
-  if (panel.job?.status === "running") return ["Generating…", "busy"];
+  if (panel.job?.status === "running") return ["Generating...", "busy"];
   if (panel.job?.status === "failed") return ["Response failed", "failed"];
   return [panel.messages.length ? "Ready" : "Not started", ""];
 }
@@ -219,13 +301,14 @@ function messageSignature(panel) {
     ids: panel.messages.map(message => message.id),
     job: panel.job && [panel.job.id, panel.job.status, panel.job.queue_position],
     start: panel.can_start,
+    ended: panel.ended_at,
     localPending: state.pendingActions.has(panel.id)
   });
 }
 
 function createPanel(panel) {
   const article = document.createElement("article");
-  article.className = "chat-panel";
+  article.className = "chat-panel session-chat";
   article.dataset.panelId = panel.id;
   article.innerHTML = `
     <header class="panel-header">
@@ -234,13 +317,13 @@ function createPanel(panel) {
     </header>
     <div class="messages" aria-live="polite"></div>
     <form class="composer">
-      <textarea rows="1" maxlength="4000" aria-label="Respond as the patient" placeholder="Respond as the patient…"></textarea>
+      <textarea rows="1" maxlength="4000" aria-label="Respond as the patient" placeholder="Respond as the patient..."></textarea>
       <button class="send-button" type="submit" aria-label="Send">&#8593;</button>
     </form>`;
   const textarea = article.querySelector("textarea");
   textarea.addEventListener("input", () => {
     textarea.style.height = "auto";
-    textarea.style.height = `${Math.min(textarea.scrollHeight, 90)}px`;
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 120)}px`;
     article.querySelector(".send-button").disabled = !textarea.value.trim() || textarea.disabled;
   });
   textarea.addEventListener("keydown", event => {
@@ -253,7 +336,7 @@ function createPanel(panel) {
     event.preventDefault();
     sendPatientMessage(panel.id, textarea.value);
   });
-  el.panelGrid.appendChild(article);
+  el.panelHost.replaceChildren(article);
   return article;
 }
 
@@ -271,7 +354,7 @@ function appendMessage(container, message) {
 }
 
 function updatePanel(panel) {
-  let article = el.panelGrid.querySelector(`[data-panel-id="${CSS.escape(panel.id)}"]`);
+  let article = el.panelHost.querySelector(`[data-panel-id="${CSS.escape(panel.id)}"]`);
   if (!article) article = createPanel(panel);
   const [statusText, statusClass] = panelStatus(panel);
   const statusNode = article.querySelector(".panel-status");
@@ -281,7 +364,7 @@ function updatePanel(panel) {
   const signature = messageSignature(panel);
   const messages = article.querySelector(".messages");
   if (messages.dataset.signature !== signature) {
-    const wasAtBottom = messages.scrollHeight - messages.scrollTop - messages.clientHeight < 60;
+    const wasAtBottom = messages.scrollHeight - messages.scrollTop - messages.clientHeight < 80;
     messages.replaceChildren();
     for (const message of panel.messages) appendMessage(messages, message);
     if (!panel.messages.length && panel.can_start && !state.pendingActions.has(panel.id)) {
@@ -291,12 +374,12 @@ function updatePanel(panel) {
       empty.querySelector("button").addEventListener("click", () => startPanel(panel.id));
       messages.appendChild(empty);
     }
-    if (panel.job?.status === "queued" || panel.job?.status === "running" || state.pendingActions.has(panel.id)) {
+    if (["queued", "running"].includes(panel.job?.status) || state.pendingActions.has(panel.id)) {
       const pending = document.createElement("div");
       pending.className = "pending-row";
       pending.textContent = panel.job?.status === "queued"
-        ? `Waiting in queue${panel.job.queue_position ? ` · position ${panel.job.queue_position}` : ""}`
-        : "Therapist is responding…";
+        ? `Waiting in queue${panel.job.queue_position ? ` - position ${panel.job.queue_position}` : ""}`
+        : "Therapist is responding...";
       messages.appendChild(pending);
     }
     if (panel.job?.status === "failed") {
@@ -307,7 +390,9 @@ function updatePanel(panel) {
       messages.appendChild(failed);
     }
     messages.dataset.signature = signature;
-    if (wasAtBottom || panel.messages.length <= 2) requestAnimationFrame(() => { messages.scrollTop = messages.scrollHeight; });
+    if (wasAtBottom || panel.messages.length <= 2) {
+      requestAnimationFrame(() => { messages.scrollTop = messages.scrollHeight; });
+    }
   }
 
   const textarea = article.querySelector("textarea");
@@ -316,25 +401,34 @@ function updatePanel(panel) {
   send.disabled = textarea.disabled || !textarea.value.trim();
 }
 
-function renderStudy() {
-  const study = state.study;
-  if (!study) return;
-  el.studyName.textContent = study.profile.display_name;
-  el.studyCondition.textContent = study.profile.condition;
-  el.finishButton.disabled = study.status === "finished" || study.panels.some(panel => ["queued", "running"].includes(panel.job?.status));
-  el.studyNote.textContent = study.status === "finished"
-    ? "This session is complete. The conversations are available for review."
-    : "Respond in character as the patient. You can move between conversations while replies wait in the queue.";
-  for (const panel of study.panels) updatePanel(panel);
+function showCurrentStage() {
+  const panel = currentPanel();
+  if (!panel || state.study.status === "finished") return showPatientProfile();
+  if (panel.status === "rating") return showRating();
+  showSession();
 }
 
-function hasPendingJobs() {
-  return Boolean(state.study?.panels.some(panel => ["queued", "running"].includes(panel.job?.status)));
+function showSession() {
+  const panel = currentPanel();
+  if (!panel) return showPatientProfile();
+  if (panel.status === "rating") return showRating();
+  const position = sessionPosition(panel);
+  el.sessionProgress.textContent = `Session ${position} of ${state.study.total_sessions}`;
+  el.sessionTherapist.textContent = panel.label;
+  el.endSession.disabled = !panel.can_end || state.pendingActions.has(panel.id);
+  updatePanel(panel);
+  showView("session");
+  schedulePoll();
+}
+
+function hasPendingJob() {
+  const panel = currentPanel();
+  return Boolean(panel && ["queued", "running"].includes(panel.job?.status));
 }
 
 function schedulePoll() {
   clearPoll();
-  if (!state.study || !hasPendingJobs()) return;
+  if (!state.study || !hasPendingJob()) return;
   state.pollTimer = window.setTimeout(refreshStudy, 1400);
 }
 
@@ -343,18 +437,21 @@ async function refreshStudy() {
   try {
     const payload = await api(`/api/studies/${state.study.id}`);
     state.study = payload.study;
-    renderStudy();
+    if (state.view === "session") showSession();
+    else if (state.view === "patient") showPatientProfile();
     schedulePoll();
   } catch (error) {
     handleAuthenticatedError(error);
-    if (state.study) state.pollTimer = window.setTimeout(refreshStudy, 3500);
+    if (state.study && state.view === "session") {
+      state.pollTimer = window.setTimeout(refreshStudy, 3500);
+    }
   }
 }
 
 async function startPanel(panelId) {
   if (state.pendingActions.has(panelId)) return;
   state.pendingActions.add(panelId);
-  renderStudy();
+  showSession();
   try {
     await api(`/api/studies/${state.study.id}/panels/${panelId}/start`, {
       method: "POST",
@@ -365,18 +462,18 @@ async function startPanel(panelId) {
     handleAuthenticatedError(error);
   } finally {
     state.pendingActions.delete(panelId);
-    renderStudy();
+    if (state.view === "session") showSession();
   }
 }
 
 async function sendPatientMessage(panelId, rawContent) {
   const content = rawContent.trim();
   if (!content || state.pendingActions.has(panelId)) return;
-  const article = el.panelGrid.querySelector(`[data-panel-id="${CSS.escape(panelId)}"]`);
+  const article = el.panelHost.querySelector(`[data-panel-id="${CSS.escape(panelId)}"]`);
   const textarea = article.querySelector("textarea");
   state.pendingActions.add(panelId);
   textarea.value = "";
-  renderStudy();
+  showSession();
   try {
     await api(`/api/studies/${state.study.id}/panels/${panelId}/messages`, {
       method: "POST",
@@ -388,14 +485,14 @@ async function sendPatientMessage(panelId, rawContent) {
     handleAuthenticatedError(error);
   } finally {
     state.pendingActions.delete(panelId);
-    renderStudy();
+    if (state.view === "session") showSession();
   }
 }
 
 async function retryPanel(panelId) {
   if (state.pendingActions.has(panelId)) return;
   state.pendingActions.add(panelId);
-  renderStudy();
+  showSession();
   try {
     await api(`/api/studies/${state.study.id}/panels/${panelId}/retry`, {
       method: "POST",
@@ -406,27 +503,159 @@ async function retryPanel(panelId) {
     handleAuthenticatedError(error);
   } finally {
     state.pendingActions.delete(panelId);
-    renderStudy();
+    if (state.view === "session") showSession();
   }
 }
 
-async function finishStudy() {
-  if (!state.study || state.study.status === "finished") return;
-  if (!window.confirm("Finish this session and lock all six conversations?")) return;
+async function endCurrentSession() {
+  const panel = currentPanel();
+  if (!panel?.can_end || state.pendingActions.has(panel.id)) return;
+  if (!window.confirm("End this session and continue to the CTRS evaluation? You will not be able to send more messages.")) return;
+  state.pendingActions.add(panel.id);
+  el.endSession.disabled = true;
   try {
-    const payload = await api(`/api/studies/${state.study.id}/finish`, { method: "POST" });
+    const payload = await api(`/api/studies/${state.study.id}/panels/${panel.id}/end`, {
+      method: "POST",
+      body: JSON.stringify({ client_request_id: requestId() })
+    });
     state.study = payload.study;
-    renderStudy();
-    showToast("Session finished.");
+    showRating();
   } catch (error) {
     handleAuthenticatedError(error);
+  } finally {
+    state.pendingActions.delete(panel.id);
   }
 }
 
-function escapeHtml(value) {
-  const node = document.createElement("div");
-  node.textContent = String(value ?? "");
-  return node.innerHTML;
+function buildRatingItems() {
+  el.ratingItems.replaceChildren();
+  let activePart = "";
+  for (const item of ctrsRubric) {
+    if (item.part !== activePart) {
+      activePart = item.part;
+      const part = document.createElement("p");
+      part.className = "ctrs-part";
+      part.textContent = activePart;
+      el.ratingItems.appendChild(part);
+    }
+    const card = document.createElement("section");
+    card.className = "ctrs-item";
+    card.dataset.key = item.key;
+
+    const heading = document.createElement("div");
+    heading.className = "ctrs-item-heading";
+    const number = document.createElement("span");
+    number.textContent = String(item.number).padStart(2, "0");
+    const title = document.createElement("h3");
+    title.textContent = item.label;
+    heading.append(number, title);
+    card.appendChild(heading);
+
+    if (item.note) {
+      const note = document.createElement("p");
+      note.className = "ctrs-note";
+      note.textContent = item.note;
+      card.appendChild(note);
+    }
+
+    const scores = document.createElement("div");
+    scores.className = "score-grid";
+    for (const score of ctrsScale) {
+      const label = document.createElement("label");
+      label.className = "score-option";
+      const input = document.createElement("input");
+      input.type = "radio";
+      input.name = item.key;
+      input.value = String(score.value);
+      input.required = true;
+      input.addEventListener("change", () => {
+        scores.querySelectorAll(".score-option").forEach(node => node.classList.toggle("selected", node === label));
+        el.ratingError.classList.add("hidden");
+      });
+      const value = document.createElement("strong");
+      value.textContent = score.value;
+      const text = document.createElement("small");
+      text.textContent = score.label;
+      label.append(input, value, text);
+      scores.appendChild(label);
+    }
+    card.appendChild(scores);
+
+    const details = document.createElement("details");
+    details.className = "anchor-details";
+    const summary = document.createElement("summary");
+    summary.textContent = "View anchors";
+    details.appendChild(summary);
+    const anchors = document.createElement("div");
+    anchors.className = "anchor-grid";
+    for (const anchorValue of [0, 2, 4, 6]) {
+      const anchor = document.createElement("div");
+      const badge = document.createElement("strong");
+      badge.textContent = String(anchorValue);
+      const text = document.createElement("p");
+      text.textContent = item.anchors[anchorValue];
+      anchor.append(badge, text);
+      anchors.appendChild(anchor);
+    }
+    details.appendChild(anchors);
+    card.appendChild(details);
+    el.ratingItems.appendChild(card);
+  }
+}
+
+function renderRatingTranscript(panel) {
+  el.ratingTranscript.replaceChildren();
+  for (const message of panel.messages) appendMessage(el.ratingTranscript, message);
+}
+
+function showRating() {
+  clearPoll();
+  const panel = currentPanel();
+  if (!panel || panel.status !== "rating") return showPatientProfile();
+  const position = sessionPosition(panel);
+  el.ratingProgress.textContent = `Session ${position} of ${state.study.total_sessions} - CTRS evaluation`;
+  el.ratingTitle.textContent = `Score ${panel.label}`;
+  renderRatingTranscript(panel);
+  if (state.ratingPanelId !== panel.id) {
+    state.ratingPanelId = panel.id;
+    el.ratingForm.reset();
+    el.ratingItems.querySelectorAll(".score-option").forEach(node => node.classList.remove("selected"));
+    el.ratingError.classList.add("hidden");
+  }
+  showView("rating");
+}
+
+async function submitRating(event) {
+  event.preventDefault();
+  const panel = currentPanel();
+  if (!panel || panel.status !== "rating") return;
+  const scores = {};
+  for (const item of ctrsRubric) {
+    const selected = el.ratingForm.querySelector(`input[name="${CSS.escape(item.key)}"]:checked`);
+    if (!selected) {
+      el.ratingError.textContent = "Please select a score for all 11 CTRS items.";
+      el.ratingError.classList.remove("hidden");
+      el.ratingForm.querySelector(`[data-key="${CSS.escape(item.key)}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
+    scores[item.key] = Number(selected.value);
+  }
+  el.ratingError.classList.add("hidden");
+  el.submitRating.disabled = true;
+  try {
+    const payload = await api(`/api/studies/${state.study.id}/panels/${panel.id}/rating`, {
+      method: "POST",
+      body: JSON.stringify({ scores, comments: el.ratingComments.value })
+    });
+    state.study = payload.study;
+    state.ratingPanelId = null;
+    showToast(state.study.status === "finished" ? "All six evaluations are complete." : "CTRS evaluation saved.");
+    showPatientProfile();
+  } catch (error) {
+    handleAuthenticatedError(error);
+  } finally {
+    el.submitRating.disabled = false;
+  }
 }
 
 el.loginForm.addEventListener("submit", async event => {
@@ -453,19 +682,24 @@ el.loginForm.addEventListener("submit", async event => {
 });
 
 el.signOut.addEventListener("click", signOut);
-el.back.addEventListener("click", loadProfiles);
+el.patientBack.addEventListener("click", loadProfiles);
+el.sessionBack.addEventListener("click", showPatientProfile);
 el.home.addEventListener("click", event => {
   event.preventDefault();
   if (state.token) loadProfiles();
 });
+el.beginSession.addEventListener("click", showCurrentStage);
 el.profileButton.addEventListener("click", openProfileDialog);
+el.ratingProfileButton.addEventListener("click", openProfileDialog);
 el.closeProfile.addEventListener("click", () => el.profileDialog.close());
 el.profileDialog.addEventListener("click", event => {
   if (event.target === el.profileDialog) el.profileDialog.close();
 });
-el.finishButton.addEventListener("click", finishStudy);
+el.endSession.addEventListener("click", endCurrentSession);
+el.ratingForm.addEventListener("submit", submitRating);
 
 async function boot() {
+  buildRatingItems();
   checkHealth();
   if (state.token) {
     el.participant.value = state.participant;

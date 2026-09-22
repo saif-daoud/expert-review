@@ -59,10 +59,9 @@ def _database(path: Path):
 class ModelWorker:
     """Persistent JSON-lines subprocess running inside one model's Conda env."""
 
-    def __init__(self, runtime: str, server_dir: Path, project_root: Path) -> None:
+    def __init__(self, runtime: str, server_dir: Path) -> None:
         self.runtime = runtime
         self.server_dir = server_dir
-        self.project_root = project_root
         upper = runtime.upper()
         defaults = RUNTIME_DEFAULTS[runtime]
         self.conda_env = os.getenv(f"STUDY_CONDA_ENV_{upper}", defaults["env"])
@@ -99,7 +98,6 @@ class ModelWorker:
             self.runtime,
         ]
         environment = os.environ.copy()
-        environment["TOPAS_PROJECT_ROOT"] = str(self.project_root)
         environment["CUDA_VISIBLE_DEVICES"] = self.gpu
         environment["PYTHONUNBUFFERED"] = "1"
         LOGGER.info(
@@ -110,7 +108,7 @@ class ModelWorker:
         )
         self.process = subprocess.Popen(
             command,
-            cwd=self.project_root,
+            cwd=self.server_dir,
             env=environment,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
@@ -180,10 +178,9 @@ class ModelWorker:
 class InferenceManager:
     """Processes all browser requests through one FIFO generation lane."""
 
-    def __init__(self, database_path: Path, server_dir: Path, project_root: Path, mode: str = "real") -> None:
+    def __init__(self, database_path: Path, server_dir: Path, mode: str = "real") -> None:
         self.database_path = database_path
         self.server_dir = server_dir
-        self.project_root = project_root
         self.mode = mode
         self.workers: dict[str, ModelWorker] = {}
         self._wake = threading.Event()
@@ -268,7 +265,7 @@ class InferenceManager:
         runtime = RUNTIME_BY_METHOD[method]
         worker = self.workers.get(runtime)
         if worker is None:
-            worker = ModelWorker(runtime, self.server_dir, self.project_root)
+            worker = ModelWorker(runtime, self.server_dir)
             self.workers[runtime] = worker
         return worker.generate(method, history)
 

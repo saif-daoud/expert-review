@@ -1,8 +1,10 @@
 # GPU API server
 
-Place this directory at `~/clean-env/server` beside the existing `simulations/` and `baselines/` directories. It is
-fully rootless: FastAPI runs in `cbt-live-api`, and model subprocesses are launched through the existing method-specific
-Conda environments.
+Place this directory anywhere writable by your user, such as `~/clean-env/server`. It contains its own model-loading
+code, policies, prompt, and PatientAct profile data; it does not import Python code from `simulations/` or `baselines/`.
+The large trained checkpoint paths are configured in `.env`. FastAPI and all model workers run without root access.
+Each configured expert receives 20 distinct profiles. Sessions run sequentially, and the API stores an 11-item CTRS
+rating before unlocking the next therapist.
 
 ```bash
 cd ~/clean-env/server
@@ -12,7 +14,7 @@ cp .env.example .env
 chmod 600 .env
 ```
 
-Edit `.env`, source it, and run the preflight check:
+Edit `.env`, including the Archer, ARIA, and Sweet-RL model-artifact paths, then run the preflight check:
 
 ```bash
 set -a; source .env; set +a

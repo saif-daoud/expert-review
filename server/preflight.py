@@ -13,15 +13,7 @@ from pathlib import Path
 SERVER_DIR = Path(__file__).resolve().parent
 
 
-def discover_project_root() -> Path:
-    candidates = (SERVER_DIR.parent, *SERVER_DIR.parents)
-    return next(
-        (candidate for candidate in candidates if (candidate / "simulations" / "agents.py").is_file()),
-        SERVER_DIR.parent,
-    )
-
-
-PROJECT_ROOT = Path(os.getenv("TOPAS_PROJECT_ROOT", str(discover_project_root()))).expanduser().resolve()
+MODEL_ROOT = Path(os.getenv("STUDY_MODEL_ROOT", str(SERVER_DIR / "models"))).expanduser().resolve()
 
 ENVIRONMENTS = {
     "base": os.getenv("STUDY_CONDA_ENV_BASE", "base"),
@@ -30,39 +22,26 @@ ENVIRONMENTS = {
     "sweet_rl": os.getenv("STUDY_CONDA_ENV_SWEET_RL", "sweet_rl"),
 }
 
+ARCHER_CHECKPOINT = Path(
+    os.getenv("STUDY_ARCHER_CHECKPOINT", str(MODEL_ROOT / "archer" / "epoch=9-step=13294.ckpt"))
+).expanduser().resolve()
+ARIA_CHECKPOINT = Path(
+    os.getenv("STUDY_ARIA_CHECKPOINT", str(MODEL_ROOT / "aria" / "trainer.pt"))
+).expanduser().resolve()
+SWEET_RL_MODEL = Path(
+    os.getenv("STUDY_SWEET_RL_MODEL", str(MODEL_ROOT / "sweet_rl" / "actor_no_tti"))
+).expanduser().resolve()
+
 REQUIRED_PATHS = {
-    "PatientAct profiles": PROJECT_ROOT / "simulations" / "data" / "patient_act.json",
-    "simulation package": PROJECT_ROOT / "simulations" / "agents.py",
-    "therapist prompt": PROJECT_ROOT / "baselines" / "sweet_rl_cbt" / "prompts" / "therapist_agent_prompt.txt",
-    "Archer checkpoint": (
-        PROJECT_ROOT
-        / "baselines"
-        / "outputs"
-        / "cbt_offlinearcher_qwen25_7b"
-        / "csv_logs"
-        / "version_0"
-        / "checkpoints"
-        / "epoch=9-step=13294.ckpt"
-    ),
-    "OfflineArcher code": PROJECT_ROOT / "baselines" / "OfflineArcher-main" / "Algorithms.py",
-    "ARIA checkpoint": PROJECT_ROOT / "baselines" / "outputs" / "cbt_aria_qwen25_7b" / "checkpoints" / "trainer.pt",
-    "Sweet-RL checkpoint": (
-        PROJECT_ROOT
-        / "baselines"
-        / "runs"
-        / "sweet_rl_cbt_qwen25_7b_full"
-        / "checkpoints"
-        / "actor_no_tti"
-    ),
-    "Sweet-RL model weights": (
-        PROJECT_ROOT
-        / "baselines"
-        / "runs"
-        / "sweet_rl_cbt_qwen25_7b_full"
-        / "checkpoints"
-        / "actor_no_tti"
-        / "model.safetensors"
-    ),
+    "bundled PatientAct profiles": SERVER_DIR / "data" / "patient_act.json",
+    "bundled model runtime": SERVER_DIR / "model_runtime" / "llm.py",
+    "bundled policy runtime": SERVER_DIR / "model_runtime" / "policies.py",
+    "bundled Archer actor": SERVER_DIR / "model_runtime" / "archer_model.py",
+    "bundled therapist prompt": SERVER_DIR / "assets" / "therapist_agent_prompt.txt",
+    "Archer checkpoint": ARCHER_CHECKPOINT,
+    "ARIA checkpoint": ARIA_CHECKPOINT,
+    "Sweet-RL checkpoint": SWEET_RL_MODEL,
+    "Sweet-RL model weights": SWEET_RL_MODEL / "model.safetensors",
 }
 
 
@@ -72,7 +51,8 @@ def conda_executable() -> str | None:
 
 def main() -> int:
     failures: list[str] = []
-    print(f"Project root: {PROJECT_ROOT}")
+    print(f"Server directory: {SERVER_DIR}")
+    print(f"Model root: {MODEL_ROOT}")
     for label, path in REQUIRED_PATHS.items():
         exists = path.is_file() if path.suffix else path.is_dir()
         print(f"[{'OK' if exists else 'MISSING'}] {label}: {path}")
