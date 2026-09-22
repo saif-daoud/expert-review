@@ -23,7 +23,7 @@ def _configured_path(variable: str, default: Path) -> str:
     return str(Path(os.getenv(variable, str(default))).expanduser().resolve())
 
 
-def configure_runtime(runtime: str) -> None:
+def configure_runtime(runtime: str, method: str) -> None:
     model_root = Path(os.getenv("STUDY_MODEL_ROOT", str(SERVER_DIR / "models"))).expanduser().resolve()
     prompt = SERVER_DIR / "assets" / "therapist_agent_prompt.txt"
     os.environ.setdefault("THERAPIST_MAX_NEW_TOKENS", "96")
@@ -35,9 +35,38 @@ def configure_runtime(runtime: str) -> None:
             os.getenv("STUDY_BASE_MODEL", "Qwen/Qwen2.5-7B-Instruct"),
         )
         os.environ.setdefault("THERAPIST_HF_DEVICE", "cuda")
-        os.environ.setdefault("THERAPIST_HF_TORCH_DTYPE", "bf16")
+        os.environ.setdefault(
+            "THERAPIST_HF_TORCH_DTYPE",
+            "float16" if method == "topas" else "bf16",
+        )
         os.environ.setdefault("THERAPIST_HF_MAX_INPUT_LENGTH", "512")
         os.environ.setdefault("THERAPIST_PROMPTING_SYSTEM_PROMPT_PATH", str(prompt))
+        if method == "topas":
+            topas_runs = Path(
+                os.getenv(
+                    "STUDY_TOPAS_RUNS_DIR",
+                    str(model_root / "topas" / "runs"),
+                )
+            ).expanduser().resolve()
+            os.environ.setdefault("STUDY_TOPAS_VARIANT", "iql_policy_term_intra_with_conv")
+            os.environ.setdefault("SIMULATION_RUNS_DIR", str(topas_runs))
+            os.environ.setdefault(
+                "SIMULATION_CONV_STATE_DIR",
+                os.getenv(
+                    "STUDY_TOPAS_CONV_STATE_DIR",
+                    str(topas_runs / "sft_conv_state_acts_L22"),
+                ),
+            )
+            os.environ.setdefault("SIMULATION_FILTER_MACROS_BY_TERMINATION", "false")
+            os.environ.setdefault("SIMULATION_MACRO_POLICY_DETERMINISTIC", "false")
+            os.environ.setdefault("SIMULATION_TERMINATION_DETERMINISTIC", "false")
+            os.environ.setdefault("SIMULATION_MICRO_POLICY_DETERMINISTIC", "false")
+            os.environ.setdefault("SIMULATION_TERMINATION_THRESHOLD", "0.5")
+            os.environ.setdefault("SIMULATION_POLICY_CONV_STATE_ONLY", "true")
+            os.environ.setdefault("SIMULATION_CONTEXT_TURNS", "5")
+            os.environ.setdefault("SIMULATION_CONV_STATE_UPDATE_INTERVAL", "1")
+            os.environ.setdefault("SIMULATION_MAX_MACRO_TURNS", "-1")
+            os.environ.setdefault("SIMULATION_DEVICE", "cuda")
         return
     if runtime == "archer":
         os.environ["THERAPIST_BACKEND"] = "archer"
@@ -101,7 +130,10 @@ def configure_runtime(runtime: str) -> None:
 
 def transcript_from_history(history: list[dict[str, Any]]) -> str:
     labels = {"therapist": "Therapist", "patient": "Patient"}
-    lines = []
+    # The CBT simulation begins every case with this domain-level utterance.
+    # It stays implicit in the browser while keeping live inference aligned
+    # with the exact simulation context used by all six therapist methods.
+    lines = ["Patient: Hello"]
     for message in history:
         role = str(message.get("role", ""))
         content = " ".join(str(message.get("content", "")).split()).strip()
@@ -113,9 +145,14 @@ def transcript_from_history(history: list[dict[str, Any]]) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--runtime", choices=("base", "archer", "aria", "sweet_rl"), required=True)
+    parser.add_argument(
+        "--method",
+        choices=("prompting", "proact", "archer", "aria", "sweet_rl", "topas"),
+        required=True,
+    )
     args = parser.parse_args()
 
-    configure_runtime(args.runtime)
+    configure_runtime(args.runtime, args.method)
 
     with redirect_stdout(sys.stderr):
         from model_runtime.llm import build_generator_from_env
@@ -124,7 +161,7 @@ def main() -> int:
         generator = build_generator_from_env("THERAPIST")
         policies: dict[str, Any] = {}
 
-    allowed_methods = {"prompting", "proact"} if args.runtime == "base" else {args.runtime}
+    allowed_methods = {args.method}
     for line in sys.stdin:
         request: dict[str, Any] = {}
         try:

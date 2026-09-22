@@ -31,17 +31,54 @@ ARIA_CHECKPOINT = Path(
 SWEET_RL_MODEL = Path(
     os.getenv("STUDY_SWEET_RL_MODEL", str(MODEL_ROOT / "sweet_rl" / "actor_no_tti"))
 ).expanduser().resolve()
+TOPAS_RUNS_DIR = Path(
+    os.getenv("STUDY_TOPAS_RUNS_DIR", str(MODEL_ROOT / "topas" / "runs"))
+).expanduser().resolve()
+TOPAS_CONV_STATE_DIR = Path(
+    os.getenv(
+        "STUDY_TOPAS_CONV_STATE_DIR",
+        str(TOPAS_RUNS_DIR / "sft_conv_state_acts_L22"),
+    )
+).expanduser().resolve()
+
+
+def optional_directory(variable: str, default: Path) -> Path:
+    value = os.getenv(variable)
+    if value is None or value.strip().lower() == "none":
+        return default
+    return Path(value).expanduser().resolve()
+
+
+TOPAS_MACRO_POLICY_DIR = optional_directory(
+    "SIMULATION_MACRO_POLICY_DIR",
+    TOPAS_RUNS_DIR / "iql_policy_over_options_with_conv_acts_L22",
+)
+TOPAS_MICRO_POLICY_DIR = optional_directory(
+    "SIMULATION_MICRO_POLICY_DIR",
+    TOPAS_RUNS_DIR / "iql_intra_option_policies_acts_L22",
+)
 
 REQUIRED_PATHS = {
     "bundled PatientAct profiles": SERVER_DIR / "data" / "patient_act.json",
     "bundled model runtime": SERVER_DIR / "model_runtime" / "llm.py",
     "bundled policy runtime": SERVER_DIR / "model_runtime" / "policies.py",
     "bundled Archer actor": SERVER_DIR / "model_runtime" / "archer_model.py",
+    "bundled TOPAS policy": SERVER_DIR / "model_runtime" / "topa_agent.py",
+    "bundled TOPAS models": SERVER_DIR / "model_runtime" / "topa_models.py",
     "bundled therapist prompt": SERVER_DIR / "assets" / "therapist_agent_prompt.txt",
+    "bundled TOPAS macro actions": SERVER_DIR / "assets" / "topa_components" / "macro_actions.json",
+    "bundled TOPAS micro actions": SERVER_DIR / "assets" / "topa_components" / "micro_actions.json",
+    "bundled TOPAS conversation states": SERVER_DIR / "assets" / "topa_components" / "conversation_states.json",
     "Archer checkpoint": ARCHER_CHECKPOINT,
     "ARIA checkpoint": ARIA_CHECKPOINT,
     "Sweet-RL checkpoint": SWEET_RL_MODEL,
     "Sweet-RL model weights": SWEET_RL_MODEL / "model.safetensors",
+    "TOPAS macro actor": TOPAS_MACRO_POLICY_DIR / "actor.pt",
+    "TOPAS termination actor": TOPAS_MACRO_POLICY_DIR / "termination.pt",
+    "TOPAS macro metadata": TOPAS_MACRO_POLICY_DIR / "metrics.json",
+    "TOPAS intra-option policies": TOPAS_MICRO_POLICY_DIR,
+    "TOPAS conversation-state actor": TOPAS_CONV_STATE_DIR / "actor.pt",
+    "TOPAS conversation-state labels": TOPAS_CONV_STATE_DIR / "label_map.json",
 }
 
 
@@ -53,6 +90,7 @@ def main() -> int:
     failures: list[str] = []
     print(f"Server directory: {SERVER_DIR}")
     print(f"Model root: {MODEL_ROOT}")
+    print(f"TOPAS runs: {TOPAS_RUNS_DIR}")
     for label, path in REQUIRED_PATHS.items():
         exists = path.is_file() if path.suffix else path.is_dir()
         print(f"[{'OK' if exists else 'MISSING'}] {label}: {path}")

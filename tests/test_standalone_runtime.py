@@ -79,3 +79,97 @@ def test_worker_has_no_simulation_or_baseline_code_imports():
     assert "import simulations" not in worker_source
     assert "from baselines" not in worker_source
     assert "import baselines" not in worker_source
+
+
+def test_topas_uses_the_live_simulation_configuration(monkeypatch, tmp_path):
+    from server.model_runtime import topa_agent
+
+    captured: dict = {}
+
+    class FakeAgent:
+        def begin_turn(self):
+            return None
+
+        def next_system_utterance(self, dialogue, session_metadata):
+            captured["dialogue"] = dialogue
+            captured["session_metadata"] = session_metadata
+            return "A TOPAS response."
+
+        def end_turn(self):
+            return {"calls": 1}
+
+        def get_last_turn_metadata(self):
+            return {"raw_output": "A TOPAS response.", "tensor_payload": {}}
+
+    def fake_build_agent(**kwargs):
+        captured.update(kwargs)
+        return FakeAgent()
+
+    monkeypatch.setattr(topa_agent, "build_agent", fake_build_agent)
+    monkeypatch.setenv("SIMULATION_RUNS_DIR", str(tmp_path / "runs"))
+    monkeypatch.setenv("SIMULATION_CONV_STATE_DIR", str(tmp_path / "conv"))
+    monkeypatch.setenv("SIMULATION_FILTER_MACROS_BY_TERMINATION", "false")
+    monkeypatch.setenv("SIMULATION_MACRO_POLICY_DETERMINISTIC", "false")
+    monkeypatch.setenv("SIMULATION_TERMINATION_DETERMINISTIC", "false")
+    monkeypatch.setenv("SIMULATION_MICRO_POLICY_DETERMINISTIC", "false")
+    monkeypatch.setenv("SIMULATION_TERMINATION_THRESHOLD", "0.5")
+    monkeypatch.setenv("SIMULATION_POLICY_CONV_STATE_ONLY", "true")
+    monkeypatch.setenv("SIMULATION_CONTEXT_TURNS", "5")
+    monkeypatch.setenv("SIMULATION_CONV_STATE_UPDATE_INTERVAL", "1")
+    monkeypatch.setenv("SIMULATION_MAX_MACRO_TURNS", "-1")
+
+    generator = RecordingGenerator(["unused"])
+    components = tmp_path / "components"
+    policy = build_standalone_policy(
+        generator,
+        "topas",
+        STANDALONE_DOMAIN,
+        components,
+    )
+    response, _ = policy.respond("Patient: Hello\nTherapist: Welcome.\nPatient: I feel anxious.")
+
+    assert response == "A TOPAS response."
+    assert captured["variant_name"] == "iql_policy_term_intra_with_conv"
+    assert captured["action_space_path"] == components
+    assert captured["context_turns"] == 5
+    assert captured["max_macro_turns"] == -1
+    assert captured["conv_state_update_interval"] == 1
+    assert captured["termination_threshold"] == 0.5
+    assert captured["macro_policy_deterministic"] is False
+    assert captured["termination_deterministic"] is False
+    assert captured["filter_macros_by_termination"] is False
+    assert captured["micro_policy_deterministic"] is False
+    assert captured["policy_conv_state_only"] is True
+    assert captured["dialogue"][-1] == {"speaker": "Patient", "text": "I feel anxious."}
+
+
+def test_topas_runtime_is_bundled_without_external_code_imports():
+    server_dir = Path(__file__).resolve().parents[1] / "server"
+    for name in ("topa_agent.py", "topa_models.py"):
+        source = (server_dir / "model_runtime" / name).read_text(encoding="utf-8")
+        assert "from simulations" not in source
+        assert "import simulations" not in source
+        assert "from baselines" not in source
+        assert "import baselines" not in source
+
+
+def test_bundled_topas_sources_match_the_simulation_runtime():
+    project_root = Path(__file__).resolve().parents[3]
+    simulation_dir = project_root / "simulations"
+    if not (simulation_dir / "topa_agent.py").is_file():
+        pytest.skip("The source simulation package is not present for comparison.")
+    server_dir = Path(__file__).resolve().parents[1] / "server"
+    relative_files = (
+        Path("topa_agent.py"),
+        Path("topa_models.py"),
+        Path("topa_components/macro_actions.json"),
+        Path("topa_components/micro_actions.json"),
+        Path("topa_components/conversation_states.json"),
+    )
+    for relative in relative_files:
+        bundled_root = (
+            server_dir / "assets"
+            if relative.parts[0] == "topa_components"
+            else server_dir / "model_runtime"
+        )
+        assert (bundled_root / relative).read_bytes() == (simulation_dir / relative).read_bytes()

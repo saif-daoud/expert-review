@@ -1,0 +1,3 @@
+topa_agent.py and topa_models.py in this directory are standalone copies of
+simulations/topa_agent.py and simulations/topa_models.py. Keep them synchronized
+with the simulation runtime when TOPAS policy/checkpoint formats change.

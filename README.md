@@ -5,10 +5,9 @@ This package contains the real six-therapist study website and its rootless GPU 
 - Each expert receives 20 distinct PatientAct role cards (10 anxiety and 10 depression profiles).
 - Each patient starts on a full profile page, followed by six sequential blinded sessions (`Therapist A` through `Therapist F`).
 - After every session, the expert must submit all 11 CTRS scores before the next therapist unlocks.
-- Prompting, ProAct, Archer, ARIA, and Sweet-RL use bundled inference code matching the simulation policies.
-- TOPAS returns a server-side static response until its policy is ready.
+- All six methods use bundled inference code matching the simulation policies, including real TOPAS inference.
 - A single FIFO queue serializes inference across all experts and panels.
-- Separate persistent workers keep models loaded in their required Conda environments.
+- A session-scoped worker loads only the model needed by an active session and unloads it when that session ends.
 - The method-to-panel mapping is randomized deterministically and never returned to the browser.
 - All messages, CTRS ratings, jobs, mappings, and completion state are stored in SQLite.
 
@@ -25,41 +24,44 @@ Browser / GitHub Pages
         v
 FastAPI + SQLite + one FIFO generation lane (cbt-live-api)
         |
-        +-- base env       / GPU 0: Prompting + ProAct, one shared Qwen
+        +-- base env       / GPU 0: Prompting, ProAct, or TOPAS
         +-- archer_env     / GPU 0: Archer
         +-- aria_env       / GPU 3: ARIA
         +-- sweet_rl       / GPU 3: Sweet-RL
-        +-- API process             TOPAS static stub
 ```
 
-Workers are loaded lazily on first use and then retained. Only one worker generates at a time, even if two experts
-submit messages together. The default GPU mapping uses GPUs 0 and 3 because those were free in the supplied
-`nvidia-smi` snapshot; change the four `STUDY_GPU_*` values if allocations change.
+Each session worker is loaded lazily on its first therapist turn, retained for that dialogue, and terminated when the
+expert clicks **Finish session**. This preserves TOPAS's option state between turns while releasing the model before
+the CTRS form and next therapist. Only one worker generates at a time, even if two experts submit messages together.
+The default GPU mapping uses GPUs 0 and 3 because those were free in the supplied `nvidia-smi` snapshot; change the
+four `STUDY_GPU_*` values if allocations change.
 
 ## Standalone server package
 
 The uploaded `server/` directory contains all Python code, prompts, and study-profile data needed by the API. It does
-not import anything from `simulations/` or `baselines/`. The trained Archer, ARIA, and Sweet-RL weights remain external
-model artifacts because they total roughly 49 GB; their locations are configured in `.env`.
+not import anything from `simulations/` or `baselines/`. The trained Archer, ARIA, Sweet-RL, and TOPAS weights remain
+external model artifacts; their locations are configured in `.env`.
 
 ```text
 ~/clean-env/
   server/
     app.py
-    model_runtime/                # bundled baseline inference code
-    assets/                       # bundled therapist prompt
+    model_runtime/                # bundled baseline + TOPAS inference code
+    assets/                       # prompts + bundled TOPAS action space
     data/patient_act.json         # bundled assigned profiles
   model-artifacts/                # optional location; may be anywhere readable
 ```
 
-Set `STUDY_ARCHER_CHECKPOINT`, `STUDY_ARIA_CHECKPOINT`, and `STUDY_SWEET_RL_MODEL` to the existing weight locations.
+Set `STUDY_ARCHER_CHECKPOINT`, `STUDY_ARIA_CHECKPOINT`, `STUDY_SWEET_RL_MODEL`, `STUDY_TOPAS_RUNS_DIR`, and
+`STUDY_TOPAS_CONV_STATE_DIR` to the existing weight locations. The TOPAS defaults in `.env.example` match the
+`iql_policy_term_intra_with_conv` command used for the simulation, including its stochastic policy flags.
 
 ## Deploy the API without root access
 
 Create a clean archive locally so the remote `.env`, database, and logs are not overwritten:
 
 ```bash
-tar -czf cbt-live-server.tar.gz --exclude=server/.env --exclude='server/data/*.sqlite3*' --exclude=server/logs --exclude=server/__pycache__ -C interface/cbt-live-interaction server
+tar -czf cbt-live-server.tar.gz --exclude=server/.env --exclude='server/data/*.sqlite3*' --exclude=server/logs --exclude='*/__pycache__' --exclude='*.pyc' -C interface/cbt-live-interaction server
 scp cbt-live-server.tar.gz YOUR_USER@YOUR_SERVER:~/clean-env/
 ```
 
@@ -80,7 +82,7 @@ python -c "import secrets; print(secrets.token_urlsafe(48))"
 ```
 
 Edit `.env` and replace `STUDY_ACCESS_CODE` and `STUDY_TOKEN_SECRET`; use the generated random string for the token
-secret. Confirm the three model-artifact paths, Conda environment names, GPU indices, public website origin, and
+secret. Confirm all model-artifact paths, Conda environment names, GPU indices, public website origin, and
 optional ngrok static domain. Then validate paths and environments without loading a model:
 
 ```bash
@@ -128,10 +130,11 @@ Open `http://127.0.0.1:5500`. Add that exact origin to `STUDY_ALLOWED_ORIGINS`. 
 ## Safe smoke test before GPU inference
 
 Set `STUDY_INFERENCE_MODE=static`, restart the API, and test all six sessions and their CTRS forms. This exercises authentication, profiles,
-SQLite, ratings, queuing, the tunnel, and the website without loading a checkpoint. Set it back to `real` for the actual five
-baselines; TOPAS remains static in both modes.
+SQLite, ratings, queuing, the tunnel, and the website without loading a checkpoint. Set it back to `real` for all six
+methods, including TOPAS.
 
-The first request to each runtime may take several minutes while its model loads. Later requests reuse that worker.
+The first request in each session may take several minutes while its model loads. Later turns in the same session reuse
+that worker; **Finish session** unloads it before the CTRS form.
 Model logs are written to `server/logs/model-<runtime>.log`; API and tunnel logs use `api.log` and `ngrok.log`.
 
 ## Inspect collected data
@@ -165,4 +168,4 @@ The test suite uses static inference and does not require CUDA.
 - Do not expose the FastAPI port directly; keep it bound to `127.0.0.1` behind HTTPS ngrok.
 - Add the approved consent, withdrawal, retention, and researcher-contact wording.
 - Rotate and remove any plaintext external API credential present in experiment shell scripts before copying code.
-- Do not treat TOPAS-panel data as a real baseline result until its worker replaces the stub.
+- Run `python preflight.py` and test one complete real TOPAS session before inviting experts.

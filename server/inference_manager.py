@@ -1,4 +1,4 @@
-"""Single-lane inference queue with persistent, Conda-isolated model workers."""
+"""Single-lane inference queue with session-scoped, Conda-isolated workers."""
 
 from __future__ import annotations
 
@@ -22,6 +22,7 @@ LOGGER = logging.getLogger("cbt_live_interaction.inference")
 RUNTIME_BY_METHOD = {
     "prompting": "base",
     "proact": "base",
+    "topas": "base",
     "archer": "archer",
     "aria": "aria",
     "sweet_rl": "sweet_rl",
@@ -57,10 +58,12 @@ def _database(path: Path):
 
 
 class ModelWorker:
-    """Persistent JSON-lines subprocess running inside one model's Conda env."""
+    """One session's JSON-lines subprocess running inside its model Conda env."""
 
-    def __init__(self, runtime: str, server_dir: Path) -> None:
+    def __init__(self, runtime: str, method: str, panel_id: str, server_dir: Path) -> None:
         self.runtime = runtime
+        self.method = method
+        self.panel_id = panel_id
         self.server_dir = server_dir
         upper = runtime.upper()
         defaults = RUNTIME_DEFAULTS[runtime]
@@ -96,12 +99,16 @@ class ModelWorker:
             str(self.server_dir / "method_worker.py"),
             "--runtime",
             self.runtime,
+            "--method",
+            self.method,
         ]
         environment = os.environ.copy()
         environment["CUDA_VISIBLE_DEVICES"] = self.gpu
         environment["PYTHONUNBUFFERED"] = "1"
         LOGGER.info(
-            "Starting runtime=%s conda_env=%s gpu=%s",
+            "Starting panel=%s method=%s runtime=%s conda_env=%s gpu=%s",
+            self.panel_id,
+            self.method,
             self.runtime,
             self.conda_env,
             self.gpu,
@@ -120,6 +127,10 @@ class ModelWorker:
         )
 
     def generate(self, method: str, history: list[dict[str, str]]) -> str:
+        if method != self.method:
+            raise RuntimeError(
+                f"Session worker for {self.method!r} cannot run method {method!r}."
+            )
         self.start()
         assert self.process is not None and self.process.stdin is not None and self.process.stdout is not None
         request_id = str(uuid.uuid4())
@@ -182,7 +193,11 @@ class InferenceManager:
         self.database_path = database_path
         self.server_dir = server_dir
         self.mode = mode
+        # Workers are owned by panels, not by model type. This preserves TOPAS'
+        # option state during one dialogue and lets us release the entire model
+        # process as soon as that session ends.
         self.workers: dict[str, ModelWorker] = {}
+        self._workers_lock = threading.RLock()
         self._wake = threading.Event()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -208,7 +223,10 @@ class InferenceManager:
         self._wake.set()
         # Stop subprocess groups first so a thread blocked on a model response
         # is released and no `conda run` child is left holding GPU memory.
-        for worker in self.workers.values():
+        with self._workers_lock:
+            workers = list(self.workers.values())
+            self.workers.clear()
+        for worker in workers:
             worker.stop()
         if self._thread is not None:
             self._thread.join(timeout=20)
@@ -259,15 +277,34 @@ class InferenceManager:
             "difficult for you right now?"
         )
 
-    def _generate(self, method: str, history: list[dict[str, str]]) -> str:
-        if self.mode != "real" or method == "topas":
+    def _generate(
+        self,
+        panel_id: str,
+        method: str,
+        history: list[dict[str, str]],
+    ) -> str:
+        if self.mode != "real":
             return self._static_response(method, history)
         runtime = RUNTIME_BY_METHOD[method]
-        worker = self.workers.get(runtime)
-        if worker is None:
-            worker = ModelWorker(runtime, self.server_dir)
-            self.workers[runtime] = worker
+        with self._workers_lock:
+            worker = self.workers.get(panel_id)
+            if worker is None:
+                worker = ModelWorker(runtime, method, panel_id, self.server_dir)
+                self.workers[panel_id] = worker
         return worker.generate(method, history)
+
+    def release_panel(self, panel_id: str) -> None:
+        """Unload the model and policy state owned by a finished session."""
+        with self._workers_lock:
+            worker = self.workers.pop(panel_id, None)
+        if worker is not None:
+            LOGGER.info(
+                "Releasing panel=%s method=%s runtime=%s",
+                panel_id,
+                worker.method,
+                worker.runtime,
+            )
+            worker.stop()
 
     def _complete_job(self, job: sqlite3.Row, utterance: str) -> None:
         now = utc_now()
@@ -305,7 +342,7 @@ class InferenceManager:
                 continue
             try:
                 history = self._history(job["panel_id"])
-                utterance = self._generate(job["method_key"], history)
+                utterance = self._generate(job["panel_id"], job["method_key"], history)
                 self._complete_job(job, utterance)
             except Exception as exc:  # A failed model must not stop later queued jobs.
                 self._fail_job(job, exc)
@@ -318,9 +355,11 @@ class InferenceManager:
             running = connection.execute(
                 "SELECT COUNT(*) FROM inference_jobs WHERE status = 'running'"
             ).fetchone()[0]
+        with self._workers_lock:
+            loaded_workers = sum(worker.running for worker in self.workers.values())
         return {
             "mode": self.mode,
             "queue_depth": int(queued),
             "busy": bool(running),
-            "loaded_workers": sum(worker.running for worker in self.workers.values()),
+            "loaded_workers": loaded_workers,
         }

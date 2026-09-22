@@ -815,6 +815,9 @@ def end_panel(
         connection.commit()
         study = get_study(connection, study_id, participant_code)
         result = serialize_study(connection, study)
+    # No inference is needed while the expert completes CTRS. Terminating the
+    # panel-owned subprocess releases the model and its CUDA allocations.
+    INFERENCE_MANAGER.release_panel(panel_id)
     return {"study": result}
 
 
@@ -882,6 +885,9 @@ def rate_panel(
         connection.commit()
         study = get_study(connection, study_id, participant_code)
         result = serialize_study(connection, study)
+    # Idempotent fallback for sessions ended before an API restart or by an
+    # older frontend that did not trigger cleanup at the end step.
+    INFERENCE_MANAGER.release_panel(panel_id)
     return {"study": result, "total_score": total_score}
 
 

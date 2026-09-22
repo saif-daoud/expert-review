@@ -198,15 +198,116 @@ class GeneratorPolicy:
         return _clean(raw), _add_prompt_diagnostics(call, self.generator)
 
 
+def _boolean_environment(name: str, default: str) -> bool:
+    value = os.environ.get(name, default).strip().lower()
+    if value not in {"true", "false"}:
+        raise ValueError(f"{name} must be true or false")
+    return value == "true"
+
+
+def _optional_directory_environment(name: str) -> str | None:
+    value = os.environ.get(name)
+    if value is None or value.strip().lower() == "none":
+        return None
+    return value
+
+
+class TOPASPolicy:
+    """The live-study wrapper for the simulation's TOPAS activation policy."""
+
+    def __init__(
+        self,
+        generator: TextGenerator,
+        components_dir: Path,
+        domain: DomainSpec = CBT_DOMAIN,
+    ) -> None:
+        # TOPAS extracts layer-22 activations itself. Do not truncate that
+        # routing input using the ordinary generation input limit.
+        if hasattr(generator, "max_input_length"):
+            generator.max_input_length = None
+
+        from .topa_agent import CONV_STATE_DIR, RUNS_DIR, build_agent
+
+        self.generator = generator
+        self.domain = domain
+        self.variant_name = os.environ.get(
+            "STUDY_TOPAS_VARIANT",
+            "iql_policy_term_intra_with_conv",
+        )
+        self.agent = build_agent(
+            variant_name=self.variant_name,
+            generator=generator,
+            action_space_path=components_dir,
+            runs_dir=os.environ.get("SIMULATION_RUNS_DIR") or RUNS_DIR,
+            conv_state_dir=os.environ.get("SIMULATION_CONV_STATE_DIR") or CONV_STATE_DIR,
+            macro_policy_dir=_optional_directory_environment("SIMULATION_MACRO_POLICY_DIR"),
+            micro_policy_dir=_optional_directory_environment("SIMULATION_MICRO_POLICY_DIR"),
+            context_turns=int(os.environ.get("SIMULATION_CONTEXT_TURNS", "5")),
+            max_macro_turns=int(os.environ.get("SIMULATION_MAX_MACRO_TURNS", "-1")),
+            conv_state_update_interval=int(
+                os.environ.get("SIMULATION_CONV_STATE_UPDATE_INTERVAL", "1")
+            ),
+            termination_threshold=float(
+                os.environ.get("SIMULATION_TERMINATION_THRESHOLD", "0.5")
+            ),
+            macro_policy_deterministic=_boolean_environment(
+                "SIMULATION_MACRO_POLICY_DETERMINISTIC", "false"
+            ),
+            termination_deterministic=_boolean_environment(
+                "SIMULATION_TERMINATION_DETERMINISTIC", "false"
+            ),
+            filter_macros_by_termination=_boolean_environment(
+                "SIMULATION_FILTER_MACROS_BY_TERMINATION", "false"
+            ),
+            micro_policy_deterministic=_boolean_environment(
+                "SIMULATION_MICRO_POLICY_DETERMINISTIC", "false"
+            ),
+            policy_conv_state_only=_boolean_environment(
+                "SIMULATION_POLICY_CONV_STATE_ONLY", "true"
+            ),
+            system_prompt=domain.system_prompt,
+            device=os.environ.get("SIMULATION_DEVICE"),
+        )
+
+    def respond(self, transcript: str) -> tuple[str, dict[str, Any]]:
+        self.agent.begin_turn()
+        raw = self.agent.next_system_utterance(
+            _dialogue(transcript, self.domain),
+            session_metadata={},
+        )
+        stats = self.agent.end_turn()
+        metadata = self.agent.get_last_turn_metadata()
+        metadata["turn_stats"] = stats
+        tensor_payload = metadata.pop("tensor_payload", {})
+        call = {
+            "utterance_system_prompt": metadata.get("utterance_prompt_system", ""),
+            "utterance_user_prompt": metadata.get("utterance_prompt_user", ""),
+            "utterance_raw_output": metadata.get("raw_output", raw),
+            "activation_policy_metadata": metadata,
+            "tensor_payload": tensor_payload,
+        }
+        if metadata.get("terminate_session"):
+            call["terminate_session"] = True
+            call["termination_reason"] = metadata.get("termination_reason", "")
+        return _clean(raw), _add_prompt_diagnostics(call, self.generator)
+
+
 def build_policy(
     generator: TextGenerator,
     method: str,
     domain: DomainSpec = CBT_DOMAIN,
-) -> PromptingPolicy | GeneratorPolicy | ProActPolicy:
+    components_dir: Path | None = None,
+) -> PromptingPolicy | GeneratorPolicy | ProActPolicy | TOPASPolicy:
     if method in {"archer", "sweet_rl", "aria"}:
         return GeneratorPolicy(generator, domain)
     if method == "prompting":
         return PromptingPolicy(generator, domain)
     if method == "proact":
         return ProActPolicy(generator, domain)
+    if method == "topas":
+        default_components = Path(__file__).resolve().parents[1] / "assets" / "topa_components"
+        configured_components = components_dir or Path(
+            os.environ.get("STUDY_TOPAS_COMPONENTS_DIR", default_components)
+        )
+        return TOPASPolicy(generator, configured_components, domain)
     raise ValueError(f"Unknown live-study policy method: {method}")
