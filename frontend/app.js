@@ -218,7 +218,8 @@ function messageSignature(panel) {
   return JSON.stringify({
     ids: panel.messages.map(message => message.id),
     job: panel.job && [panel.job.id, panel.job.status, panel.job.queue_position],
-    start: panel.can_start
+    start: panel.can_start,
+    localPending: state.pendingActions.has(panel.id)
   });
 }
 
@@ -322,7 +323,7 @@ function renderStudy() {
   el.studyCondition.textContent = study.profile.condition;
   el.finishButton.disabled = study.status === "finished" || study.panels.some(panel => ["queued", "running"].includes(panel.job?.status));
   el.studyNote.textContent = study.status === "finished"
-    ? "This patient study is complete. The conversations are available for review."
+    ? "This session is complete. The conversations are available for review."
     : "Respond in character as the patient. You can move between conversations while replies wait in the queue.";
   for (const panel of study.panels) updatePanel(panel);
 }
@@ -411,12 +412,12 @@ async function retryPanel(panelId) {
 
 async function finishStudy() {
   if (!state.study || state.study.status === "finished") return;
-  if (!window.confirm("Finish this patient and lock all six conversations?")) return;
+  if (!window.confirm("Finish this session and lock all six conversations?")) return;
   try {
     const payload = await api(`/api/studies/${state.study.id}/finish`, { method: "POST" });
     state.study = payload.study;
     renderStudy();
-    showToast("Patient study finished.");
+    showToast("Session finished.");
   } catch (error) {
     handleAuthenticatedError(error);
   }
