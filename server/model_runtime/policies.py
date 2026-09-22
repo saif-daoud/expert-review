@@ -12,9 +12,10 @@ from .llm import TextGenerator, finish_utterance
 
 
 SPEAKER_PREFIX = re.compile(
-    r"^\s*(?:(?:therapist|patient|client|persuader|persuadee)\s*:\s*)+",
+    r"^\s*(?:(?:assistant|therapist|patient|client|persuader|persuadee)\s*:\s*)+",
     re.IGNORECASE,
 )
+ASSISTANT_BOUNDARY = re.compile(r"\bassistant\s*:", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -31,6 +32,7 @@ class DomainSpec:
     @property
     def stop_tokens(self) -> list[str]:
         return [
+            "\nAssistant:",
             f"\n{self.user_role}:",
             f"\n{self.system_role}:",
             *(f"\n{role}:" for role in self.user_role_aliases),
@@ -55,7 +57,11 @@ CBT_DOMAIN = DomainSpec(
 
 
 def _clean(text: str) -> str:
-    return finish_utterance(SPEAKER_PREFIX.sub("", str(text or "")).strip())
+    cleaned = SPEAKER_PREFIX.sub("", str(text or "")).strip()
+    boundary = ASSISTANT_BOUNDARY.search(cleaned)
+    if boundary is not None:
+        cleaned = cleaned[: boundary.start()].strip()
+    return finish_utterance(cleaned)
 
 
 def _dialogue(transcript: str, domain: DomainSpec) -> list[dict[str, str]]:

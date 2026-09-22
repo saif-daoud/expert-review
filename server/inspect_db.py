@@ -65,7 +65,8 @@ def main() -> int:
             print(
                 f"  {panel['label']}  id={panel['id']}{method} "
                 f"messages={panel['message_count']} latest_job={panel['job_status'] or '-'} "
-                f"ended={panel['ended_at'] or '-'} ctrs={panel['ctrs_total'] if panel['ctrs_total'] is not None else '-'}"
+                f"ended={panel['ended_at'] or '-'} reason={panel['termination_reason'] or '-'} "
+                f"ctrs={panel['ctrs_total'] if panel['ctrs_total'] is not None else '-'}"
             )
             if args.messages:
                 messages = connection.execute(

@@ -5,6 +5,7 @@ This package contains the real six-therapist study website and its rootless GPU 
 - Each expert receives 20 distinct PatientAct role cards (10 anxiety and 10 depression profiles).
 - Each patient starts on a full profile page, followed by six sequential blinded sessions (`Therapist A` through `Therapist F`).
 - After every session, the expert must submit all 11 CTRS scores before the next therapist unlocks.
+- A session ends manually, after 50 therapist-patient turns, or when either speaker gives a simulation-style farewell.
 - All six methods use bundled inference code matching the simulation policies, including real TOPAS inference.
 - A single FIFO queue serializes inference across all experts and panels.
 - A session-scoped worker loads only the model needed by an active session and unloads it when that session ends.
@@ -31,7 +32,7 @@ FastAPI + SQLite + one FIFO generation lane (cbt-live-api)
 ```
 
 Each session worker is loaded lazily on its first therapist turn, retained for that dialogue, and terminated when the
-expert clicks **Finish session**. This preserves TOPAS's option state between turns while releasing the model before
+expert clicks **End session** or an automatic stopping rule fires. This preserves TOPAS's option state between turns while releasing the model before
 the CTRS form and next therapist. Only one worker generates at a time, even if two experts submit messages together.
 The default GPU mapping uses GPUs 0 and 3 because those were free in the supplied `nvidia-smi` snapshot; change the
 four `STUDY_GPU_*` values if allocations change.
@@ -134,7 +135,7 @@ SQLite, ratings, queuing, the tunnel, and the website without loading a checkpoi
 methods, including TOPAS.
 
 The first request in each session may take several minutes while its model loads. Later turns in the same session reuse
-that worker; **Finish session** unloads it before the CTRS form.
+that worker; ending manually, reaching `STUDY_MAX_SESSION_TURNS`, or detecting a farewell unloads it before the CTRS form.
 Model logs are written to `server/logs/model-<runtime>.log`; API and tunnel logs use `api.log` and `ngrok.log`.
 
 ## Inspect collected data

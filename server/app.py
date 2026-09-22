@@ -28,9 +28,11 @@ from pydantic import BaseModel, StrictInt
 if __package__:
     from .inference_manager import InferenceManager
     from .profiles import load_profiles, profile_card, public_profile
+    from .session_rules import farewell_phrase
 else:
     from inference_manager import InferenceManager
     from profiles import load_profiles, profile_card, public_profile
+    from session_rules import farewell_phrase
 
 
 LOGGER = logging.getLogger("cbt_live_interaction")
@@ -43,6 +45,7 @@ TOKEN_SECRET = os.getenv("STUDY_TOKEN_SECRET", "").strip()
 TOKEN_TTL_SECONDS = int(os.getenv("STUDY_TOKEN_TTL_SECONDS", str(12 * 60 * 60)))
 DATABASE_PATH = Path(os.getenv("STUDY_DB_PATH", str(DEFAULT_DB_PATH))).expanduser().resolve()
 INFERENCE_MODE = os.getenv("STUDY_INFERENCE_MODE", "real").strip().lower()
+MAX_SESSION_TURNS = int(os.getenv("STUDY_MAX_SESSION_TURNS", "50"))
 ALLOWED_ORIGINS = [
     origin.strip().rstrip("/")
     for origin in os.getenv("STUDY_ALLOWED_ORIGINS", "").split(",")
@@ -194,6 +197,7 @@ def initialize_database() -> None:
                 method_key TEXT NOT NULL,
                 display_order INTEGER NOT NULL,
                 ended_at TEXT,
+                termination_reason TEXT,
                 FOREIGN KEY (study_id) REFERENCES studies(id) ON DELETE CASCADE,
                 UNIQUE (study_id, label),
                 UNIQUE (study_id, method_key)
@@ -246,6 +250,8 @@ def initialize_database() -> None:
         }
         if "ended_at" not in panel_columns:
             connection.execute("ALTER TABLE study_panels ADD COLUMN ended_at TEXT")
+        if "termination_reason" not in panel_columns:
+            connection.execute("ALTER TABLE study_panels ADD COLUMN termination_reason TEXT")
         # Studies completed by the earlier parallel-chat UI have no CTRS
         # ratings. Reopen them so the new sequential evaluation can resume.
         connection.execute(
@@ -407,6 +413,7 @@ def serialize_study(connection: sqlite3.Connection, study: sqlite3.Row) -> dict:
                 "status": panel_status,
                 "is_current": is_current,
                 "ended_at": panel["ended_at"],
+                "termination_reason": panel["termination_reason"],
                 "messages": messages,
                 "job": serialize_job(connection, job),
                 "rating": (
@@ -453,6 +460,7 @@ def serialize_study(connection: sqlite3.Connection, study: sqlite3.Row) -> dict:
         "current_panel_id": current_panel_id,
         "completed_sessions": completed_sessions,
         "total_sessions": len(PANEL_LABELS),
+        "max_session_turns": MAX_SESSION_TURNS,
         "created_at": study["created_at"],
         "updated_at": study["updated_at"],
         "finished_at": study["finished_at"],
@@ -513,6 +521,8 @@ async def lifespan(_: FastAPI):
         raise RuntimeError("STUDY_TOKEN_SECRET is required and must contain at least 32 characters.")
     if INFERENCE_MODE not in {"real", "static"}:
         raise RuntimeError("STUDY_INFERENCE_MODE must be 'real' or 'static'.")
+    if MAX_SESSION_TURNS < 1:
+        raise RuntimeError("STUDY_MAX_SESSION_TURNS must be at least 1.")
     if len(set(EXPERT_CODES)) != 2 or not all(PARTICIPANT_CODE_PATTERN.fullmatch(code) for code in EXPERT_CODES):
         raise RuntimeError("The two configured expert codes must be distinct valid participant codes.")
     INFERENCE_MANAGER.start()
@@ -743,9 +753,44 @@ def send_message(
             (panel_id, content, request_id, now),
         )
         job = _enqueue_job(connection, panel["id"], "message", request_id)
+        matched_farewell = farewell_phrase(content)
+        therapist_turns = int(
+            connection.execute(
+                "SELECT COUNT(*) FROM panel_messages WHERE panel_id = ? AND role = 'therapist'",
+                (panel_id,),
+            ).fetchone()[0]
+        )
+        automatic_reason = (
+            "patient_farewell"
+            if matched_farewell
+            else "max_turns"
+            if therapist_turns >= MAX_SESSION_TURNS
+            else None
+        )
+        if automatic_reason:
+            connection.execute(
+                """
+                UPDATE inference_jobs
+                SET status = 'completed', started_at = ?, completed_at = ?, error = NULL
+                WHERE id = ?
+                """,
+                (now, now, job["id"]),
+            )
+            connection.execute(
+                "UPDATE study_panels SET ended_at = ?, termination_reason = ? WHERE id = ?",
+                (now, automatic_reason, panel_id),
+            )
         connection.execute("UPDATE studies SET updated_at = ? WHERE id = ?", (now, study_id))
         connection.commit()
+        job = connection.execute("SELECT * FROM inference_jobs WHERE id = ?", (job["id"],)).fetchone()
         result = serialize_job(connection, job)
+    if automatic_reason:
+        INFERENCE_MANAGER.release_panel(panel_id)
+        return {
+            "job": result,
+            "auto_ended": True,
+            "termination_reason": automatic_reason,
+        }
     INFERENCE_MANAGER.notify()
     return {"job": result}
 
@@ -810,7 +855,10 @@ def end_panel(
             if latest is None or latest["role"] != "therapist":
                 connection.rollback()
                 raise HTTPException(status_code=409, detail="Start the session before ending it.")
-            connection.execute("UPDATE study_panels SET ended_at = ? WHERE id = ?", (now, panel_id))
+            connection.execute(
+                "UPDATE study_panels SET ended_at = ?, termination_reason = 'expert_ended' WHERE id = ?",
+                (now, panel_id),
+            )
             connection.execute("UPDATE studies SET updated_at = ? WHERE id = ?", (now, study_id))
         connection.commit()
         study = get_study(connection, study_id, participant_code)

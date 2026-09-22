@@ -16,6 +16,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+if __package__:
+    from .session_rules import farewell_phrase
+else:
+    from session_rules import farewell_phrase
+
 
 LOGGER = logging.getLogger("cbt_live_interaction.inference")
 
@@ -306,8 +311,9 @@ class InferenceManager:
             )
             worker.stop()
 
-    def _complete_job(self, job: sqlite3.Row, utterance: str) -> None:
+    def _complete_job(self, job: sqlite3.Row, utterance: str) -> bool:
         now = utc_now()
+        automatic_end = farewell_phrase(utterance) is not None
         with _database(self.database_path) as connection:
             connection.execute("BEGIN IMMEDIATE")
             connection.execute(
@@ -318,8 +324,19 @@ class InferenceManager:
                 "UPDATE inference_jobs SET status = 'completed', completed_at = ?, error = NULL WHERE id = ?",
                 (now, job["id"]),
             )
+            if automatic_end:
+                connection.execute(
+                    """
+                    UPDATE study_panels
+                    SET ended_at = COALESCE(ended_at, ?),
+                        termination_reason = COALESCE(termination_reason, 'therapist_farewell')
+                    WHERE id = ?
+                    """,
+                    (now, job["panel_id"]),
+                )
             connection.execute("UPDATE studies SET updated_at = ? WHERE id = ?", (now, job["study_id"]))
             connection.commit()
+        return automatic_end
 
     def _fail_job(self, job: sqlite3.Row, exc: Exception) -> None:
         LOGGER.exception("Inference job %s failed for its hidden method.", job["id"], exc_info=exc)
@@ -343,7 +360,9 @@ class InferenceManager:
             try:
                 history = self._history(job["panel_id"])
                 utterance = self._generate(job["panel_id"], job["method_key"], history)
-                self._complete_job(job, utterance)
+                automatic_end = self._complete_job(job, utterance)
+                if automatic_end:
+                    self.release_panel(job["panel_id"])
             except Exception as exc:  # A failed model must not stop later queued jobs.
                 self._fail_job(job, exc)
 

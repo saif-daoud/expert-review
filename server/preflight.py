@@ -62,6 +62,7 @@ REQUIRED_PATHS = {
     "bundled PatientAct profiles": SERVER_DIR / "data" / "patient_act.json",
     "bundled model runtime": SERVER_DIR / "model_runtime" / "llm.py",
     "bundled policy runtime": SERVER_DIR / "model_runtime" / "policies.py",
+    "bundled session stopping rules": SERVER_DIR / "session_rules.py",
     "bundled Archer actor": SERVER_DIR / "model_runtime" / "archer_model.py",
     "bundled TOPAS policy": SERVER_DIR / "model_runtime" / "topa_agent.py",
     "bundled TOPAS models": SERVER_DIR / "model_runtime" / "topa_models.py",

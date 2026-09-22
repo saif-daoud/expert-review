@@ -54,6 +54,7 @@ const el = {
   panelHost: document.getElementById("panel-host"),
   ratingProgress: document.getElementById("rating-progress"),
   ratingTitle: document.getElementById("rating-title"),
+  automaticEndNote: document.getElementById("automatic-end-note"),
   ratingProfileButton: document.getElementById("rating-profile-button"),
   ratingTranscript: document.getElementById("rating-transcript"),
   ratingForm: document.getElementById("rating-form"),
@@ -615,6 +616,14 @@ function showRating() {
   const position = sessionPosition(panel);
   el.ratingProgress.textContent = `Session ${position} of ${state.study.total_sessions} - CTRS evaluation`;
   el.ratingTitle.textContent = `Score ${panel.label}`;
+  const automaticEndMessages = {
+    therapist_farewell: "The session ended after the therapist said goodbye.",
+    patient_farewell: "The session ended after your farewell.",
+    max_turns: `The session ended automatically after ${state.study.max_session_turns || 50} dialogue turns.`
+  };
+  const automaticEndMessage = automaticEndMessages[panel.termination_reason] || "";
+  el.automaticEndNote.textContent = automaticEndMessage;
+  el.automaticEndNote.classList.toggle("hidden", !automaticEndMessage);
   renderRatingTranscript(panel);
   if (state.ratingPanelId !== panel.id) {
     state.ratingPanelId = panel.id;

@@ -8,13 +8,14 @@ import time
 from fastapi.testclient import TestClient
 
 
-def load_client(monkeypatch, tmp_path):
+def load_client(monkeypatch, tmp_path, max_session_turns=50):
     monkeypatch.setenv("STUDY_DB_PATH", str(tmp_path / "study.sqlite3"))
     monkeypatch.setenv("STUDY_ACCESS_CODE", "test-access-code")
     monkeypatch.setenv("STUDY_TOKEN_SECRET", "test-token-secret-that-is-not-used-in-production")
     monkeypatch.setenv("STUDY_ALLOWED_ORIGINS", "http://127.0.0.1:5500")
     monkeypatch.setenv("STUDY_SERVE_FRONTEND", "false")
     monkeypatch.setenv("STUDY_INFERENCE_MODE", "static")
+    monkeypatch.setenv("STUDY_MAX_SESSION_TURNS", str(max_session_turns))
     sys.modules.pop("server.app", None)
     module = importlib.import_module("server.app")
     return TestClient(module.app)
@@ -184,6 +185,95 @@ def test_sequential_six_session_ctrs_flow(monkeypatch, tmp_path):
         assert finished.status_code == 200
         profiles = client.get("/api/profiles", headers=headers).json()["profiles"]
         assert profiles[0]["study"]["completed_sessions"] == 6
+
+
+def test_patient_farewell_ends_without_another_therapist_response(monkeypatch, tmp_path):
+    with load_client(monkeypatch, tmp_path) as client:
+        headers = login(client, "EXPERT-5834")
+        profile = client.get("/api/profiles", headers=headers).json()["profiles"][0]
+        study = client.post("/api/studies", headers=headers, json={"profile_id": profile["id"]}).json()["study"]
+        panel = study["panels"][0]
+        client.post(
+            f"/api/studies/{study['id']}/panels/{panel['id']}/start",
+            headers=headers,
+            json={"client_request_id": "farewell-start"},
+        )
+        panel = wait_for_panel(client, headers, study["id"], panel["id"])
+
+        response = client.post(
+            f"/api/studies/{study['id']}/panels/{panel['id']}/messages",
+            headers=headers,
+            json={"content": "Thank you. Bye-bye.", "client_message_id": "patient-farewell"},
+        )
+        assert response.status_code == 200
+        assert response.json()["auto_ended"] is True
+        assert response.json()["termination_reason"] == "patient_farewell"
+        study = client.get(f"/api/studies/{study['id']}", headers=headers).json()["study"]
+        panel = study["panels"][0]
+        assert panel["status"] == "rating"
+        assert panel["termination_reason"] == "patient_farewell"
+        assert [message["role"] for message in panel["messages"]] == ["therapist", "patient"]
+
+
+def test_therapist_farewell_ends_after_storing_response(monkeypatch, tmp_path):
+    with load_client(monkeypatch, tmp_path) as client:
+        app_module = sys.modules["server.app"]
+        monkeypatch.setattr(
+            app_module.INFERENCE_MANAGER,
+            "_static_response",
+            lambda _method, _history: "Take care. Goodbye.",
+        )
+        headers = login(client, "EXPERT-5834")
+        profile = client.get("/api/profiles", headers=headers).json()["profiles"][0]
+        study = client.post("/api/studies", headers=headers, json={"profile_id": profile["id"]}).json()["study"]
+        panel = study["panels"][0]
+        client.post(
+            f"/api/studies/{study['id']}/panels/{panel['id']}/start",
+            headers=headers,
+            json={"client_request_id": "therapist-farewell"},
+        )
+        panel = wait_for_panel(client, headers, study["id"], panel["id"])
+        assert panel["status"] == "rating"
+        assert panel["termination_reason"] == "therapist_farewell"
+        assert panel["messages"][-1]["content"] == "Take care. Goodbye."
+
+
+def test_session_ends_after_configured_dialogue_turn_limit(monkeypatch, tmp_path):
+    with load_client(monkeypatch, tmp_path, max_session_turns=2) as client:
+        headers = login(client, "EXPERT-5834")
+        profile = client.get("/api/profiles", headers=headers).json()["profiles"][0]
+        study = client.post("/api/studies", headers=headers, json={"profile_id": profile["id"]}).json()["study"]
+        panel = study["panels"][0]
+        client.post(
+            f"/api/studies/{study['id']}/panels/{panel['id']}/start",
+            headers=headers,
+            json={"client_request_id": "limit-start"},
+        )
+        panel = wait_for_panel(client, headers, study["id"], panel["id"])
+        client.post(
+            f"/api/studies/{study['id']}/panels/{panel['id']}/messages",
+            headers=headers,
+            json={"content": "First response.", "client_message_id": "limit-one"},
+        )
+        panel = wait_for_panel(client, headers, study["id"], panel["id"])
+        response = client.post(
+            f"/api/studies/{study['id']}/panels/{panel['id']}/messages",
+            headers=headers,
+            json={"content": "Second response.", "client_message_id": "limit-two"},
+        )
+        assert response.status_code == 200
+        assert response.json()["termination_reason"] == "max_turns"
+        study = client.get(f"/api/studies/{study['id']}", headers=headers).json()["study"]
+        panel = study["panels"][0]
+        assert study["max_session_turns"] == 2
+        assert panel["status"] == "rating"
+        assert panel["termination_reason"] == "max_turns"
+        assert [message["role"] for message in panel["messages"]] == [
+            "therapist",
+            "patient",
+            "therapist",
+            "patient",
+        ]
 
 
 def test_studies_are_private_and_mapping_is_stable(monkeypatch, tmp_path):
