@@ -696,9 +696,39 @@ def start_panel(
         ).fetchone():
             connection.rollback()
             raise HTTPException(status_code=409, detail="A response is already queued for this conversation.")
+        previous_panel_ids = [
+            row["id"]
+            for row in connection.execute(
+                """
+                SELECT p.id
+                FROM study_panels AS p
+                JOIN studies AS s ON s.id = p.study_id
+                WHERE s.participant_code = ?
+                  AND p.id <> ?
+                  AND p.ended_at IS NULL
+                  AND (
+                      EXISTS (SELECT 1 FROM panel_messages AS m WHERE m.panel_id = p.id)
+                      OR EXISTS (SELECT 1 FROM inference_jobs AS j WHERE j.panel_id = p.id)
+                  )
+                """,
+                (participant_code, panel_id),
+            ).fetchall()
+        ]
+        for previous_panel_id in previous_panel_ids:
+            connection.execute(
+                """
+                UPDATE inference_jobs
+                SET status = 'failed', completed_at = ?, error = 'Session left before generation completed.'
+                WHERE panel_id = ? AND status IN ('queued', 'running')
+                """,
+                (utc_now(), previous_panel_id),
+            )
         job = _enqueue_job(connection, panel["id"], "start", request_id)
         connection.commit()
         result = serialize_job(connection, job)
+    for previous_panel_id in previous_panel_ids:
+        INFERENCE_MANAGER.pause_panel(previous_panel_id)
+    INFERENCE_MANAGER.activate_panel(panel_id)
     INFERENCE_MANAGER.notify()
     return {"job": result}
 
@@ -791,6 +821,7 @@ def send_message(
             "auto_ended": True,
             "termination_reason": automatic_reason,
         }
+    INFERENCE_MANAGER.activate_panel(panel_id)
     INFERENCE_MANAGER.notify()
     return {"job": result}
 
@@ -820,8 +851,42 @@ def retry_panel(
         job = _enqueue_job(connection, panel["id"], "retry", request_id)
         connection.commit()
         result = serialize_job(connection, job)
+    INFERENCE_MANAGER.activate_panel(panel_id)
     INFERENCE_MANAGER.notify()
     return {"job": result}
+
+
+@app.post("/api/studies/{study_id}/panels/{panel_id}/leave")
+def leave_panel(
+    study_id: str,
+    panel_id: str,
+    payload: ActionRequest,
+    participant_code: str = Depends(require_participant),
+) -> dict:
+    _validate_request_id(payload.client_request_id)
+    now = utc_now()
+    with DATABASE_LOCK, database() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        study, panel = get_panel(connection, study_id, panel_id, participant_code)
+        panel_ended = bool(panel["ended_at"])
+        if not panel_ended:
+            connection.execute(
+                """
+                UPDATE inference_jobs
+                SET status = 'failed', completed_at = ?, error = 'Session left before generation completed.'
+                WHERE panel_id = ? AND status IN ('queued', 'running')
+                """,
+                (now, panel_id),
+            )
+        connection.commit()
+    if panel_ended:
+        INFERENCE_MANAGER.release_panel(panel_id)
+    else:
+        INFERENCE_MANAGER.pause_panel(panel_id)
+    with database() as connection:
+        study = get_study(connection, study_id, participant_code)
+        result = serialize_study(connection, study)
+    return {"study": result}
 
 
 @app.post("/api/studies/{study_id}/panels/{panel_id}/end")

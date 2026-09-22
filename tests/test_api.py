@@ -215,6 +215,65 @@ def test_patient_farewell_ends_without_another_therapist_response(monkeypatch, t
         assert [message["role"] for message in panel["messages"]] == ["therapist", "patient"]
 
 
+def test_leaving_unloads_without_ending_and_next_patient_pauses_previous(monkeypatch, tmp_path):
+    with load_client(monkeypatch, tmp_path) as client:
+        app_module = sys.modules["server.app"]
+        paused_panels = []
+        activated_panels = []
+        original_pause = app_module.INFERENCE_MANAGER.pause_panel
+        original_activate = app_module.INFERENCE_MANAGER.activate_panel
+
+        def record_pause(panel_id):
+            paused_panels.append(panel_id)
+            original_pause(panel_id)
+
+        def record_activate(panel_id):
+            activated_panels.append(panel_id)
+            original_activate(panel_id)
+
+        monkeypatch.setattr(app_module.INFERENCE_MANAGER, "pause_panel", record_pause)
+        monkeypatch.setattr(app_module.INFERENCE_MANAGER, "activate_panel", record_activate)
+
+        headers = login(client, "EXPERT-5834")
+        profiles = client.get("/api/profiles", headers=headers).json()["profiles"]
+        first_study = client.post(
+            "/api/studies", headers=headers, json={"profile_id": profiles[0]["id"]}
+        ).json()["study"]
+        first_panel = first_study["panels"][0]
+        client.post(
+            f"/api/studies/{first_study['id']}/panels/{first_panel['id']}/start",
+            headers=headers,
+            json={"client_request_id": "leave-start-one"},
+        )
+        first_panel = wait_for_panel(client, headers, first_study["id"], first_panel["id"])
+        original_messages = first_panel["messages"]
+
+        left = client.post(
+            f"/api/studies/{first_study['id']}/panels/{first_panel['id']}/leave",
+            headers=headers,
+            json={"client_request_id": "leave-one"},
+        )
+        assert left.status_code == 200
+        left_panel = left.json()["study"]["panels"][0]
+        assert left_panel["ended_at"] is None
+        assert left_panel["status"] == "active"
+        assert left_panel["messages"] == original_messages
+        assert paused_panels == [first_panel["id"]]
+
+        second_study = client.post(
+            "/api/studies", headers=headers, json={"profile_id": profiles[1]["id"]}
+        ).json()["study"]
+        second_panel = second_study["panels"][0]
+        started = client.post(
+            f"/api/studies/{second_study['id']}/panels/{second_panel['id']}/start",
+            headers=headers,
+            json={"client_request_id": "leave-start-two"},
+        )
+        assert started.status_code == 200
+        assert paused_panels == [first_panel["id"], first_panel["id"]]
+        assert activated_panels[-1] == second_panel["id"]
+
+
 def test_therapist_farewell_ends_after_storing_response(monkeypatch, tmp_path):
     with load_client(monkeypatch, tmp_path) as client:
         app_module = sys.modules["server.app"]

@@ -202,6 +202,7 @@ class InferenceManager:
         # option state during one dialogue and lets us release the entire model
         # process as soon as that session ends.
         self.workers: dict[str, ModelWorker] = {}
+        self._paused_panels: set[str] = set()
         self._workers_lock = threading.RLock()
         self._wake = threading.Event()
         self._stop = threading.Event()
@@ -231,6 +232,7 @@ class InferenceManager:
         with self._workers_lock:
             workers = list(self.workers.values())
             self.workers.clear()
+            self._paused_panels.clear()
         for worker in workers:
             worker.stop()
         if self._thread is not None:
@@ -292,6 +294,8 @@ class InferenceManager:
             return self._static_response(method, history)
         runtime = RUNTIME_BY_METHOD[method]
         with self._workers_lock:
+            if panel_id in self._paused_panels:
+                raise RuntimeError("This session was left before generation completed.")
             worker = self.workers.get(panel_id)
             if worker is None:
                 worker = ModelWorker(runtime, method, panel_id, self.server_dir)
@@ -301,6 +305,7 @@ class InferenceManager:
     def release_panel(self, panel_id: str) -> None:
         """Unload the model and policy state owned by a finished session."""
         with self._workers_lock:
+            self._paused_panels.discard(panel_id)
             worker = self.workers.pop(panel_id, None)
         if worker is not None:
             LOGGER.info(
@@ -311,11 +316,39 @@ class InferenceManager:
             )
             worker.stop()
 
+    def pause_panel(self, panel_id: str) -> None:
+        """Unload an unfinished session and block a racing queued generation."""
+        with self._workers_lock:
+            self._paused_panels.add(panel_id)
+            worker = self.workers.pop(panel_id, None)
+        if worker is not None:
+            LOGGER.info(
+                "Pausing panel=%s method=%s runtime=%s",
+                panel_id,
+                worker.method,
+                worker.runtime,
+            )
+            worker.stop()
+
+    def activate_panel(self, panel_id: str) -> None:
+        """Allow a new or resumed session to load its worker on demand."""
+        with self._workers_lock:
+            self._paused_panels.discard(panel_id)
+
     def _complete_job(self, job: sqlite3.Row, utterance: str) -> bool:
         now = utc_now()
         automatic_end = farewell_phrase(utterance) is not None
         with _database(self.database_path) as connection:
             connection.execute("BEGIN IMMEDIATE")
+            current = connection.execute(
+                "SELECT status FROM inference_jobs WHERE id = ?", (job["id"],)
+            ).fetchone()
+            # Leaving a session marks queued/running work as failed before the
+            # worker is stopped. If generation wins that race, discard its
+            # stale result instead of appending a reply after the expert left.
+            if current is None or current["status"] != "running":
+                connection.commit()
+                return False
             connection.execute(
                 "INSERT INTO panel_messages(panel_id, role, content, created_at) VALUES (?, 'therapist', ?, ?)",
                 (job["panel_id"], utterance, now),

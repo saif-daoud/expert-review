@@ -8,7 +8,7 @@ This package contains the real six-therapist study website and its rootless GPU 
 - A session ends manually, after 50 therapist-patient turns, or when either speaker gives a simulation-style farewell.
 - All six methods use bundled inference code matching the simulation policies, including real TOPAS inference.
 - A single FIFO queue serializes inference across all experts and panels.
-- A session-scoped worker loads only the model needed by an active session and unloads it when that session ends.
+- A session-scoped worker loads only the model needed by the current chat and unloads when the expert leaves or ends it.
 - The method-to-panel mapping is randomized deterministically and never returned to the browser.
 - All messages, CTRS ratings, jobs, mappings, and completion state are stored in SQLite.
 
@@ -31,9 +31,11 @@ FastAPI + SQLite + one FIFO generation lane (cbt-live-api)
         +-- sweet_rl       / GPU 3: Sweet-RL
 ```
 
-Each session worker is loaded lazily on its first therapist turn, retained for that dialogue, and terminated when the
-expert clicks **End session** or an automatic stopping rule fires. This preserves TOPAS's option state between turns while releasing the model before
-the CTRS form and next therapist. Only one worker generates at a time, even if two experts submit messages together.
+Each session worker is loaded lazily on its first therapist turn and retained while the expert remains in that chat.
+It is terminated when the expert leaves the chat, starts a different patient's session, clicks **End session**, or an
+automatic stopping rule fires. The transcript remains stored when an unfinished chat is left, and the worker is loaded
+again on the next message after it is resumed. This preserves TOPAS's option state during an uninterrupted session while
+releasing the model before another patient or therapist is used. Only one worker generates at a time, even if two experts submit messages together.
 The default GPU mapping uses GPUs 0 and 3 because those were free in the supplied `nvidia-smi` snapshot; change the
 four `STUDY_GPU_*` values if allocations change.
 
@@ -134,8 +136,9 @@ Set `STUDY_INFERENCE_MODE=static`, restart the API, and test all six sessions an
 SQLite, ratings, queuing, the tunnel, and the website without loading a checkpoint. Set it back to `real` for all six
 methods, including TOPAS.
 
-The first request in each session may take several minutes while its model loads. Later turns in the same session reuse
-that worker; ending manually, reaching `STUDY_MAX_SESSION_TURNS`, or detecting a farewell unloads it before the CTRS form.
+The first request in each session may take several minutes while its model loads. Later turns in the same uninterrupted
+session reuse that worker; leaving the chat, starting a different patient, ending manually, reaching
+`STUDY_MAX_SESSION_TURNS`, or detecting a farewell unloads it. Resuming an unfinished chat therefore has another model-load delay.
 Model logs are written to `server/logs/model-<runtime>.log`; API and tunnel logs use `api.log` and `ngrok.log`.
 
 ## Inspect collected data

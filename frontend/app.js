@@ -528,6 +528,26 @@ async function endCurrentSession() {
   }
 }
 
+async function leaveCurrentSession(nextView = showPatientProfile) {
+  const panel = currentPanel();
+  if (!panel || panel.ended_at) {
+    nextView();
+    return;
+  }
+  clearPoll();
+  try {
+    const payload = await api(`/api/studies/${state.study.id}/panels/${panel.id}/leave`, {
+      method: "POST",
+      body: JSON.stringify({ client_request_id: requestId() })
+    });
+    state.study = payload.study;
+    nextView();
+  } catch (error) {
+    handleAuthenticatedError(error);
+    if (state.token && state.study) showSession();
+  }
+}
+
 function buildRatingItems() {
   el.ratingItems.replaceChildren();
   let activePart = "";
@@ -690,12 +710,17 @@ el.loginForm.addEventListener("submit", async event => {
   }
 });
 
-el.signOut.addEventListener("click", signOut);
+el.signOut.addEventListener("click", () => {
+  if (state.view === "session") leaveCurrentSession(signOut);
+  else signOut();
+});
 el.patientBack.addEventListener("click", loadProfiles);
-el.sessionBack.addEventListener("click", showPatientProfile);
+el.sessionBack.addEventListener("click", () => leaveCurrentSession(showPatientProfile));
 el.home.addEventListener("click", event => {
   event.preventDefault();
-  if (state.token) loadProfiles();
+  if (!state.token) return;
+  if (state.view === "session") leaveCurrentSession(loadProfiles);
+  else loadProfiles();
 });
 el.beginSession.addEventListener("click", showCurrentStage);
 el.profileButton.addEventListener("click", openProfileDialog);
@@ -706,6 +731,19 @@ el.profileDialog.addEventListener("click", event => {
 });
 el.endSession.addEventListener("click", endCurrentSession);
 el.ratingForm.addEventListener("submit", submitRating);
+
+window.addEventListener("pagehide", () => {
+  const panel = currentPanel();
+  if (!state.token || state.view !== "session" || !panel || panel.ended_at) return;
+  const headers = { "Content-Type": "application/json", Authorization: `Bearer ${state.token}` };
+  if (usesNgrok) headers["ngrok-skip-browser-warning"] = "1";
+  fetch(`${apiBase}/api/studies/${state.study.id}/panels/${panel.id}/leave`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ client_request_id: requestId() }),
+    keepalive: true
+  }).catch(() => {});
+});
 
 async function boot() {
   buildRatingItems();
