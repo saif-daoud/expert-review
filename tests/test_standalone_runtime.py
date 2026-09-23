@@ -79,7 +79,11 @@ def test_bundled_policies_match_simulation_prompts(method, outputs):
         assert standalone_call["user"] == simulation_call["user"]
         # Live inference adds the requested boundary for leaked continuation
         # text while otherwise retaining the simulation's stop list.
-        assert standalone_call["stop"] == ["\nAssistant:", *simulation_call["stop"]]
+        assert standalone_call["stop"] == [
+            "\nAssistant:",
+            "\nHuman:",
+            *simulation_call["stop"],
+        ]
 
 
 def test_worker_has_no_simulation_or_baseline_code_imports():
@@ -185,10 +189,12 @@ def test_bundled_topas_sources_match_the_simulation_runtime():
         assert (bundled_root / relative).read_bytes() == (simulation_dir / relative).read_bytes()
 
 
-def test_assistant_marker_is_a_generation_boundary():
+def test_leaked_speaker_markers_are_generation_boundaries():
     raw = (
         "Hello, it's okay to share. What comes to mind first?"
         "Assistant: It sounds like you're having a tough day."
     )
     assert _clean(raw) == "Hello, it's okay to share. What comes to mind first?"
     assert _clean("Assistant: Hello, how are you feeling?") == "Hello, how are you feeling?"
+    assert _clean("Could you tell me more?Human: I feel anxious.") == "Could you tell me more?"
+    assert _clean("That sounds difficult. Patient: Yes, it is.") == "That sounds difficult."

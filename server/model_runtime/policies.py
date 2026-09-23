@@ -15,7 +15,10 @@ SPEAKER_PREFIX = re.compile(
     r"^\s*(?:(?:assistant|therapist|patient|client|persuader|persuadee)\s*:\s*)+",
     re.IGNORECASE,
 )
-ASSISTANT_BOUNDARY = re.compile(r"\bassistant\s*:", re.IGNORECASE)
+LEAKED_TURN_BOUNDARY = re.compile(
+    r"\b(?:assistant|human|user|system|therapist|patient|client)\s*:",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -33,6 +36,7 @@ class DomainSpec:
     def stop_tokens(self) -> list[str]:
         return [
             "\nAssistant:",
+            "\nHuman:",
             f"\n{self.user_role}:",
             f"\n{self.system_role}:",
             *(f"\n{role}:" for role in self.user_role_aliases),
@@ -58,7 +62,7 @@ CBT_DOMAIN = DomainSpec(
 
 def _clean(text: str) -> str:
     cleaned = SPEAKER_PREFIX.sub("", str(text or "")).strip()
-    boundary = ASSISTANT_BOUNDARY.search(cleaned)
+    boundary = LEAKED_TURN_BOUNDARY.search(cleaned)
     if boundary is not None:
         cleaned = cleaned[: boundary.start()].strip()
     return finish_utterance(cleaned)
