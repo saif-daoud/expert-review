@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import base64
 import binascii
 import hashlib
@@ -22,28 +21,16 @@ from typing import Iterator
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, StrictInt
 
 if __package__:
     from .inference_manager import InferenceManager
-    from .llm_relay import (
-        RelayConfig,
-        RelayValidationError,
-        forward_response_payload,
-        validate_response_payload,
-    )
     from .profiles import load_profiles, profile_card, public_profile
     from .session_rules import farewell_phrase
 else:
     from inference_manager import InferenceManager
-    from llm_relay import (
-        RelayConfig,
-        RelayValidationError,
-        forward_response_payload,
-        validate_response_payload,
-    )
     from profiles import load_profiles, profile_card, public_profile
     from session_rules import farewell_phrase
 
@@ -65,7 +52,6 @@ ALLOWED_ORIGINS = [
     if origin.strip()
 ]
 SERVE_FRONTEND = os.getenv("STUDY_SERVE_FRONTEND", "false").strip().lower() in {"1", "true", "yes", "on"}
-RELAY_CONFIG = RelayConfig.from_environment()
 
 PARTICIPANT_CODE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{1,63}$")
 DATABASE_LOCK = threading.RLock()
@@ -578,57 +564,7 @@ async def security_headers(request: Request, call_next):
 
 @app.get("/api/health")
 def health() -> dict:
-    return {
-        "status": "ok",
-        "inference": INFERENCE_MANAGER.health(),
-        "simulator_relay": {"configured": RELAY_CONFIG.configured, "model": RELAY_CONFIG.model},
-    }
-
-
-@app.post("/api/simulator-relay/responses")
-async def simulator_relay(request: Request, authorization: str | None = Header(default=None)) -> Response:
-    if not RELAY_CONFIG.configured:
-        raise HTTPException(status_code=503, detail="The simulator relay is not configured.")
-    supplied_token = ""
-    if authorization and authorization.startswith("Bearer "):
-        supplied_token = authorization.removeprefix("Bearer ").strip()
-    if not supplied_token or not hmac.compare_digest(supplied_token, RELAY_CONFIG.token):
-        raise HTTPException(status_code=401, detail="Relay authentication failed.")
-
-    content_length = request.headers.get("content-length")
-    if content_length:
-        try:
-            if int(content_length) > RELAY_CONFIG.max_request_bytes:
-                raise HTTPException(status_code=413, detail="The relay request is too large.")
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail="Invalid Content-Length header.") from exc
-
-    body = bytearray()
-    async for chunk in request.stream():
-        body.extend(chunk)
-        if len(body) > RELAY_CONFIG.max_request_bytes:
-            raise HTTPException(status_code=413, detail="The relay request is too large.")
-    try:
-        payload = json.loads(body)
-        forwarded = validate_response_payload(payload, RELAY_CONFIG)
-    except (json.JSONDecodeError, UnicodeDecodeError):
-        return JSONResponse({"error": {"message": "The request body must be valid JSON."}}, status_code=400)
-    except RelayValidationError as exc:
-        return JSONResponse({"error": {"message": str(exc)}}, status_code=422)
-
-    try:
-        upstream = await asyncio.to_thread(forward_response_payload, forwarded, RELAY_CONFIG)
-    except Exception as exc:
-        LOGGER.exception("Simulator relay upstream request failed: %s", type(exc).__name__)
-        return JSONResponse(
-            {"error": {"message": "The model provider could not complete this request."}},
-            status_code=502,
-        )
-    return Response(
-        content=upstream.body,
-        status_code=upstream.status_code,
-        media_type=upstream.content_type,
-    )
+    return {"status": "ok", "inference": INFERENCE_MANAGER.health()}
 
 
 @app.post("/api/auth/login")

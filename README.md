@@ -141,17 +141,6 @@ session reuse that worker; leaving the chat, starting a different patient, endin
 `STUDY_MAX_SESSION_TURNS`, or detecting a farewell unloads it. Resuming an unfinished chat therefore has another model-load delay.
 Model logs are written to `server/logs/model-<runtime>.log`; API and tunnel logs use `api.log` and `ngrok.log`.
 
-## Patient-simulator GPT-4.1 relay
-
-The same FastAPI process exposes `POST /api/simulator-relay/responses` for the separate patient-simulator evaluation
-Worker. This is a private server-to-server endpoint: it uses a dedicated bearer token, accepts only the configured
-GPT-4.1 Responses API fields, forces `store: false`, and applies request and output-token limits. The provider key stays
-in the QCRI server's `.env`.
-
-Set `SIMULATOR_RELAY_TOKEN`, `SIMULATOR_RELAY_UPSTREAM_API_KEY`, `SIMULATOR_RELAY_UPSTREAM_BASE_URL`, and
-`SIMULATOR_RELAY_MODEL` in the remote `server/.env`. Set the matching token as the Cloudflare Worker's
-`LLM_RELAY_TOKEN` secret. The public relay base URL is the ngrok origin followed by `/api/simulator-relay`.
-
 ## Inspect collected data
 
 ```bash
