@@ -96,6 +96,25 @@ def _raw_policy_prompt(transcript: str, system_prompt: str, domain: DomainSpec) 
     return "\n".join(lines)
 
 
+def _bounded_history_user(
+    generator: TextGenerator,
+    *,
+    system: str,
+    prefix: str,
+    history: str,
+    suffix: str,
+) -> str:
+    builder = getattr(generator, "build_user_with_history", None)
+    if callable(builder):
+        return builder(
+            system=system,
+            prefix=prefix,
+            history=history,
+            suffix=suffix,
+        )
+    return f"{prefix}{history}{suffix}"
+
+
 def _add_prompt_diagnostics(call: dict[str, Any], generator: TextGenerator) -> dict[str, Any]:
     if generator.save_prompt_diagnostics:
         call["prompt_diagnostics"] = generator.last_prompt_diagnostics
@@ -128,23 +147,29 @@ class ProActPolicy:
             "Now write only the next therapist utterance. If this is the first therapist turn, "
             "begin naturally with a greeting such as hi or hello before inviting the patient to share what brought them in."
         )
-        reasoning_user = f"""Conversation so far:
-        {transcript}
-
-        {reasoning_task}"""
+        reasoning_user = _bounded_history_user(
+            self.generator,
+            system=self.reasoning_system_prompt,
+            prefix="Conversation so far:\n        ",
+            history=transcript,
+            suffix=f"\n\n        {reasoning_task}",
+        )
         reasoning_raw = self.generator.generate(
             system=self.reasoning_system_prompt,
             user=reasoning_user,
             stop=self.domain.stop_tokens,
         ).strip()
         reasoning_diagnostics = dict(self.generator.last_prompt_diagnostics)
-        utterance_user = f"""Conversation so far:
-        {transcript}
-
-        Hidden planning notes (do not reveal these notes):
-        {reasoning_raw}
-
-        {utterance_task}"""
+        utterance_user = _bounded_history_user(
+            self.generator,
+            system=self.utterance_system_prompt,
+            prefix="Conversation so far:\n        ",
+            history=transcript,
+            suffix=(
+                "\n\n        Hidden planning notes (do not reveal these notes):\n"
+                f"        {reasoning_raw}\n\n        {utterance_task}"
+            ),
+        )
         utterance_raw = self.generator.generate(
             system=self.utterance_system_prompt,
             user=utterance_user,
@@ -173,7 +198,17 @@ class PromptingPolicy:
         self.system_prompt = prompt_path.read_text(encoding="utf-8").strip()
 
     def respond(self, transcript: str) -> tuple[str, dict[str, Any]]:
-        full_prompt = _raw_policy_prompt(transcript, self.system_prompt, self.domain)
+        history = "\n".join(
+            f"{turn['speaker']}: {turn['text']}"
+            for turn in _dialogue(transcript, self.domain)
+        )
+        full_prompt = _bounded_history_user(
+            self.generator,
+            system="",
+            prefix=f"{self.system_prompt}\n\n{self.domain.dialogue_heading}\n",
+            history=history,
+            suffix=f"\n{self.domain.system_role}:",
+        )
         raw = self.generator.generate(system="", user=full_prompt, stop=self.domain.stop_tokens)
         call = {
             "utterance_system_prompt": self.system_prompt,

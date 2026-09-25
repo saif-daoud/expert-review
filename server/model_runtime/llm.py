@@ -311,6 +311,17 @@ class TextGenerator(abc.ABC):
     def generate(self, *, system: str, user: str, stop: Optional[List[str]] = None) -> str:
         raise NotImplementedError
 
+    def build_user_with_history(
+        self,
+        *,
+        system: str,
+        prefix: str,
+        history: str,
+        suffix: str,
+    ) -> str:
+        """Compose a prompt whose history may be shortened by bounded backends."""
+        return f"{prefix}{history}{suffix}"
+
     def generate_messages_structured(self, messages: List[Dict[str, str]], response_format: Any) -> Any:
         """Generate a typed response without modifying the supplied prompts."""
         system = "\n\n".join(m["content"] for m in messages if m["role"] == "system")
@@ -562,6 +573,74 @@ Assistant:" prompt.
                 pass
 
         return f"System:\n{system}\n\nUser:\n{user}\n\nAssistant:\n"
+
+    def build_user_with_history(
+        self,
+        *,
+        system: str,
+        prefix: str,
+        history: str,
+        suffix: str,
+    ) -> str:
+        """Fit only conversation history into the model's input budget.
+
+        The system instruction, chat-template tokens, and fixed user prompt
+        text are counted first and are never removed. The oldest history
+        tokens are dropped until the complete rendered prompt fits.
+        """
+        full_user = f"{prefix}{history}{suffix}"
+        if self.max_input_length is None:
+            return full_user
+
+        limit = int(self.max_input_length)
+
+        def prompt_tokens(candidate_history: str) -> int:
+            rendered = self._build_prompt(
+                system,
+                f"{prefix}{candidate_history}{suffix}",
+            )
+            return int(len(self.tokenizer(rendered)["input_ids"]))
+
+        if prompt_tokens(history) <= limit:
+            return full_user
+        if prompt_tokens("") > limit:
+            raise ValueError(
+                "The fixed system instruction and task text exceed the model's "
+                f"{limit}-token input limit; refusing to truncate them."
+            )
+
+        history_ids = list(
+            self.tokenizer(history, add_special_tokens=False)["input_ids"]
+        )
+
+        def decode_suffix(keep: int) -> str:
+            if keep <= 0:
+                return ""
+            return self.tokenizer.decode(
+                history_ids[-keep:],
+                skip_special_tokens=True,
+                clean_up_tokenization_spaces=False,
+            )
+
+        low, high = 0, len(history_ids)
+        while low < high:
+            keep = (low + high + 1) // 2
+            if prompt_tokens(decode_suffix(keep)) <= limit:
+                low = keep
+            else:
+                high = keep - 1
+
+        fitted = decode_suffix(low)
+        if low < len(history_ids) and "\n" in fitted:
+            # Avoid beginning with a partial old turn when a complete newer
+            # turn is available. Keep a complete leading speaker line intact.
+            if re.match(
+                r"^\s*(?:patient|therapist|client|persuader|persuadee|user|assistant)\s*:",
+                fitted,
+                re.IGNORECASE,
+            ) is None:
+                fitted = fitted.split("\n", 1)[1]
+        return f"{prefix}{fitted}{suffix}"
 
     def generate(self, *, system: str, user: str, stop: Optional[List[str]] = None) -> str:
         import torch

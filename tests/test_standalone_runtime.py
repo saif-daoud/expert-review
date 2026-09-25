@@ -8,6 +8,7 @@ import pytest
 from server.model_runtime.policies import CBT_DOMAIN as STANDALONE_DOMAIN
 from server.model_runtime.policies import _clean
 from server.model_runtime.policies import build_policy as build_standalone_policy
+from server.model_runtime.llm import TransformersChatGenerator
 
 
 class RecordingGenerator:
@@ -30,6 +31,41 @@ class RecordingGenerator:
 
     def turn_stats(self) -> dict:
         return {"calls": len(self.calls)}
+
+
+class CharacterTokenizer:
+    def __call__(self, text: str, **_kwargs):
+        return {"input_ids": [ord(character) for character in text]}
+
+    def decode(self, token_ids, **_kwargs):
+        return "".join(chr(token_id) for token_id in token_ids)
+
+
+def test_context_limit_truncates_only_conversation_history():
+    generator = object.__new__(TransformersChatGenerator)
+    generator.prompt_style = "chat"
+    generator.max_input_length = 180
+    generator.tokenizer = CharacterTokenizer()
+    system = "SYSTEM INSTRUCTION MUST REMAIN COMPLETE"
+    prefix = "Conversation so far:\n"
+    suffix = "\nWrite only the next therapist response."
+    history = "\n".join(
+        f"Patient: historical turn {index}" for index in range(20)
+    )
+
+    user = generator.build_user_with_history(
+        system=system,
+        prefix=prefix,
+        history=history,
+        suffix=suffix,
+    )
+    rendered = generator._build_prompt(system, user)
+
+    assert len(generator.tokenizer(rendered)["input_ids"]) <= 180
+    assert system in rendered
+    assert suffix.strip() in rendered
+    assert "historical turn 19" in rendered
+    assert "historical turn 0" not in rendered
 
 
 @pytest.mark.parametrize(
