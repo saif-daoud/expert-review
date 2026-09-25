@@ -154,14 +154,37 @@ Model logs are written to `server/logs/model-<runtime>.log`; API and tunnel logs
 
 ## Patient-simulator GPT-4.1 relay
 
-The same FastAPI process exposes `POST /api/simulator-relay/responses` for the separate patient-simulator evaluation
-Worker. This is a private server-to-server endpoint: it uses a dedicated bearer token, accepts only the configured
-GPT-4.1 Responses API fields, forces `store: false`, and applies request and output-token limits. The provider key stays
-in the QCRI server's `.env`.
+The patient-simulator relay is a separate FastAPI process on localhost port `8001`, independent of the live CBT API on
+port `8000`. It has its own ngrok tunnel, logs, and PID files. The relay uses a dedicated bearer token, accepts only the
+configured GPT-4.1 Responses API fields, forces `store: false`, and applies request and output-token limits. The provider
+key stays in the QCRI server's `.env`.
 
 Set `SIMULATOR_RELAY_TOKEN`, `SIMULATOR_RELAY_UPSTREAM_API_KEY`, `SIMULATOR_RELAY_UPSTREAM_BASE_URL`, and
-`SIMULATOR_RELAY_MODEL` in the remote `server/.env`. Set the matching token as the Cloudflare Worker's
-`LLM_RELAY_TOKEN` secret. The public relay base URL is the ngrok origin followed by `/api/simulator-relay`.
+`SIMULATOR_RELAY_MODEL` in the remote `server/.env`. Set `SIMULATOR_RELAY_NGROK_DOMAIN` to a static domain that is
+different from the CBT study's `NGROK_DOMAIN`. Set the matching token and `https://<relay-domain>/api` base URL as the
+Cloudflare Worker's `LLM_RELAY_TOKEN` and `LLM_RELAY_BASE_URL` secrets.
+
+Start the isolated relay and its separate tunnel without restarting the CBT study API:
+
+```bash
+source ~/miniconda3/etc/profile.d/conda.sh
+conda activate cbt-live-api
+cd ~/clean-env/server
+mkdir -p logs
+
+nohup bash run_relay.sh > logs/relay-api.log 2>&1 & echo $! > logs/relay-api.pid
+curl --fail http://127.0.0.1:8001/api/health
+
+nohup bash run_relay_ngrok.sh > logs/relay-ngrok.log 2>&1 & echo $! > logs/relay-ngrok.pid
+grep -o 'https://[^ ]*ngrok-free[^ ]*' logs/relay-ngrok.log | tail -1
+```
+
+To stop only the relay services:
+
+```bash
+kill "$(cat logs/relay-ngrok.pid)" 2>/dev/null || true
+kill "$(cat logs/relay-api.pid)" 2>/dev/null || true
+```
 
 ## Inspect collected data
 
