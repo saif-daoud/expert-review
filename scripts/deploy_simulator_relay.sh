@@ -10,6 +10,16 @@ incoming_secrets="${deploy_root}/relay-secrets.env"
 backup_dir="$(mktemp -d "${deploy_root}/relay-backup.XXXXXX")"
 restart_required=false
 
+conda_script="${CONDA_SH:-${HOME}/miniconda3/etc/profile.d/conda.sh}"
+api_conda_environment="${CBT_LIVE_API_CONDA_ENV:-cbt-live-api}"
+if [[ ! -f "$conda_script" ]]; then
+  echo "Conda initialization script not found at ${conda_script}." >&2
+  exit 1
+fi
+# shellcheck disable=SC1090
+source "$conda_script"
+conda activate "$api_conda_environment"
+
 cleanup_incoming() {
   rm -f "$incoming_app" "$incoming_relay" "$incoming_example" "$incoming_secrets"
 }
