@@ -106,17 +106,6 @@ nohup bash run_ngrok.sh > logs/ngrok.log 2>&1 & echo $! > logs/ngrok.pid
 grep -o 'https://[^ ]*ngrok-free[^ ]*' logs/ngrok.log | tail -1
 ```
 
-If an API restart was attempted from a fresh SSH shell without activating Conda, recover it with:
-
-```bash
-source ~/miniconda3/etc/profile.d/conda.sh
-conda activate cbt-live-api
-cd ~/clean-env/server
-mkdir -p logs
-nohup bash run.sh > logs/api.log 2>&1 & echo $! > logs/api.pid
-curl --fail http://127.0.0.1:8000/api/health
-```
-
 Paste the resulting HTTPS origin into `frontend/config.js`. The VPN is not needed by the browser once ngrok is
 running. A free changing ngrok URL must be pasted again after each restart; a static ngrok domain avoids that.
 
