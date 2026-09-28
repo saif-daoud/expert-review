@@ -12,7 +12,8 @@ This package contains the real six-therapist study website and its rootless GPU 
 - A session ends manually, after 50 therapist-patient turns, or when either speaker gives a simulation-style farewell.
 - All six methods use bundled inference code matching the simulation policies, including real TOPAS inference.
 - A single FIFO queue serializes inference across all experts and panels.
-- A session-scoped worker loads only the model needed by the current chat and unloads when the expert leaves or ends it.
+- A session-scoped worker loads only the model needed by the current chat and unloads when the expert leaves, ends it, or does not reply for 60 seconds.
+- New workers use first-fit GPU allocation across GPUs 0–3 using live free-memory checks and method-specific safety thresholds.
 - The method-to-panel mapping is randomized deterministically and never returned to the browser.
 - All messages, CTRS ratings, jobs, mappings, and completion state are stored in SQLite.
 
@@ -29,19 +30,20 @@ Browser / GitHub Pages
         v
 FastAPI + SQLite + one FIFO generation lane (cbt-live-api)
         |
-        +-- base env       / GPU 0: Prompting, ProAct, or TOPAS
-        +-- archer_env     / GPU 0: Archer
-        +-- aria_env       / GPU 3: ARIA
-        +-- sweet_rl       / GPU 3: Sweet-RL
+        +-- first-fit allocator: GPU 0 -> GPU 1 -> GPU 2 -> GPU 3
+              +-- base env: Prompting, ProAct, or TOPAS
+              +-- archer_env: Archer
+              +-- aria_env: ARIA
+              +-- sweet_rl: Sweet-RL
 ```
 
-Each session worker is loaded lazily on its first therapist turn and retained while the expert remains in that chat.
-It is terminated when the expert leaves the chat, starts a different patient's session, clicks **End session**, or an
-automatic stopping rule fires. The transcript remains stored when an unfinished chat is left, and the worker is loaded
-again on the next message after it is resumed. This preserves TOPAS's option state during an uninterrupted session while
-releasing the model before another patient or therapist is used. Only one worker generates at a time, even if two experts submit messages together.
-The default GPU mapping uses GPUs 0 and 3 because those were free in the supplied `nvidia-smi` snapshot; change the
-four `STUDY_GPU_*` values if allocations change.
+Each session worker is loaded lazily on its first therapist turn and retained while the expert remains active in that
+chat. It is terminated when the expert leaves, waits 60 seconds without replying, starts a different patient's session,
+clicks **End session**, or an automatic stopping rule fires. The transcript remains stored when an unfinished chat is
+left, and the worker is loaded again on the next message after it is resumed. This preserves TOPAS's option state during
+an uninterrupted active session while releasing idle models. Only one worker generates at a time, even if two experts
+submit messages together. New workers inspect GPUs 0–3 in order and use the first one with enough free memory. If all
+four are unavailable, the browser presents a five-minute retry countdown.
 
 ## Standalone server package
 
@@ -140,9 +142,10 @@ Set `STUDY_INFERENCE_MODE=static`, restart the API, and test all six sessions an
 SQLite, ratings, queuing, the tunnel, and the website without loading a checkpoint. Set it back to `real` for all six
 methods, including TOPAS.
 
-The first request in each session may take several minutes while its model loads. Later turns in the same uninterrupted
-session reuse that worker; leaving the chat, starting a different patient, ending manually, reaching
-`STUDY_MAX_SESSION_TURNS`, or detecting a farewell unloads it. Resuming an unfinished chat therefore has another model-load delay.
+The first request in each session may take several minutes while its model loads. Later turns within 60 seconds reuse
+that worker; leaving the chat, remaining inactive for 60 seconds, starting a different patient, ending manually,
+reaching `STUDY_MAX_SESSION_TURNS`, or detecting a farewell unloads it. Resuming an unloaded unfinished chat therefore
+has another model-load delay.
 Model logs are written to `server/logs/model-<runtime>.log`; API and tunnel logs use `api.log` and `ngrok.log`.
 
 ## Inspect collected data

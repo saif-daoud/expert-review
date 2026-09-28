@@ -336,7 +336,14 @@ function panelStatus(panel) {
 function messageSignature(panel) {
   return JSON.stringify({
     ids: panel.messages.map(message => message.id),
-    job: panel.job && [panel.job.id, panel.job.status, panel.job.queue_position],
+    job: panel.job && [
+      panel.job.id,
+      panel.job.status,
+      panel.job.queue_position,
+      panel.job.error_code,
+      panel.job.message,
+      panel.job.retry_after_seconds
+    ],
     start: panel.can_start,
     ended: panel.ended_at,
     localPending: state.pendingActions.has(panel.id)
@@ -422,8 +429,34 @@ function updatePanel(panel) {
     if (panel.job?.status === "failed") {
       const failed = document.createElement("div");
       failed.className = "failed-row";
-      failed.innerHTML = `<span>Response could not be generated.</span><button class="retry-button" type="button">Try again</button>`;
-      failed.querySelector("button").addEventListener("click", () => retryPanel(panel.id));
+      const message = document.createElement("span");
+      message.textContent = panel.job.error_code === "server_gpu_full"
+        ? "The server is currently full. Please retry again in 5 minutes."
+        : "Response could not be generated.";
+      const retry = document.createElement("button");
+      retry.className = "retry-button";
+      retry.type = "button";
+      const retryAfterSeconds = Number(panel.job.retry_after_seconds || 0);
+      const completedAt = Date.parse(panel.job.completed_at || "");
+      const elapsedSeconds = Number.isFinite(completedAt)
+        ? Math.max(0, (Date.now() - completedAt) / 1000)
+        : 0;
+      const remainingSeconds = panel.job.error_code === "server_gpu_full"
+        ? Math.max(0, retryAfterSeconds - elapsedSeconds)
+        : 0;
+      retry.disabled = remainingSeconds > 0;
+      retry.textContent = remainingSeconds > 0
+        ? `Retry in ${Math.ceil(remainingSeconds / 60)} min`
+        : "Try again";
+      if (remainingSeconds > 0) {
+        window.setTimeout(() => {
+          if (!retry.isConnected) return;
+          retry.disabled = false;
+          retry.textContent = "Try again";
+        }, remainingSeconds * 1000);
+      }
+      retry.addEventListener("click", () => retryPanel(panel.id));
+      failed.append(message, retry);
       messages.appendChild(failed);
     }
     messages.dataset.signature = signature;

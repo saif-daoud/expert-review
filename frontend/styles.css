@@ -145,6 +145,7 @@ input:focus, textarea:focus { border-color: #3a8882; box-shadow: 0 0 0 3px rgba(
 .pending-row, .failed-row { margin: auto 0 0; padding: 9px 11px; border-radius: 11px; background: #fff7e8; color: #8b641f; font-size: 12px; }
 .failed-row { background: #fff0ee; color: var(--danger); display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .retry-button { border: 0; background: transparent; color: inherit; text-decoration: underline; font-weight: 800; }
+.retry-button:disabled { cursor: not-allowed; opacity: .7; text-decoration: none; }
 .composer { padding: 10px; border-top: 1px solid #e1e9e6; display: flex; gap: 8px; margin: 0; }
 .composer textarea { min-height: 42px; max-height: 90px; resize: none; padding: 10px 12px; border-radius: 12px; font-size: 13px; }
 .send-button { flex: 0 0 42px; width: 42px; height: 42px; border: 0; border-radius: 12px; background: var(--teal); color: white; font-weight: 900; }

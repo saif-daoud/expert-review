@@ -26,11 +26,21 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, StrictInt
 
 if __package__:
-    from .inference_manager import InferenceManager
+    from .inference_manager import (
+        GPU_FULL_ERROR_CODE,
+        GPU_FULL_PUBLIC_MESSAGE,
+        GPU_RETRY_AFTER_SECONDS,
+        InferenceManager,
+    )
     from .profiles import load_profiles, profile_card, public_profile
     from .session_rules import farewell_phrase
 else:
-    from inference_manager import InferenceManager
+    from inference_manager import (
+        GPU_FULL_ERROR_CODE,
+        GPU_FULL_PUBLIC_MESSAGE,
+        GPU_RETRY_AFTER_SECONDS,
+        InferenceManager,
+    )
     from profiles import load_profiles, profile_card, public_profile
     from session_rules import farewell_phrase
 
@@ -583,7 +593,7 @@ def _queue_position(connection: sqlite3.Connection, job: sqlite3.Row) -> int | N
 def serialize_job(connection: sqlite3.Connection, job: sqlite3.Row | None) -> dict | None:
     if job is None:
         return None
-    return {
+    result = {
         "id": job["id"],
         "status": job["status"],
         "queue_position": _queue_position(connection, job),
@@ -592,6 +602,15 @@ def serialize_job(connection: sqlite3.Connection, job: sqlite3.Row | None) -> di
         "completed_at": job["completed_at"],
         "can_retry": job["status"] == "failed",
     }
+    if job["status"] == "failed" and job["error"] == GPU_FULL_ERROR_CODE:
+        result.update(
+            {
+                "error_code": GPU_FULL_ERROR_CODE,
+                "message": GPU_FULL_PUBLIC_MESSAGE,
+                "retry_after_seconds": GPU_RETRY_AFTER_SECONDS,
+            }
+        )
+    return result
 
 
 def serialize_study(connection: sqlite3.Connection, study: sqlite3.Row) -> dict:

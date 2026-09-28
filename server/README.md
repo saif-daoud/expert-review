@@ -31,9 +31,12 @@ curl --fail http://127.0.0.1:8000/api/health
 nohup bash run_ngrok.sh > logs/ngrok.log 2>&1 & echo $! > logs/ngrok.pid
 ```
 
-The API must run with one Uvicorn worker because it owns the single FIFO generation lane. Worker placement defaults
-to base + Archer on GPU 0 and ARIA + Sweet-RL on GPU 3. Override `STUDY_GPU_*` in `.env` if the allocation changes.
-TOPAS uses the bundled standalone implementation and the artifact paths configured in `.env`.
+The API must run with one Uvicorn worker because it owns the single FIFO generation lane. For every new session worker,
+the allocator checks live free memory with `nvidia-smi` and tries GPUs `0,1,2,3` in order. It skips GPUs below the
+method-specific `STUDY_GPU_MIN_FREE_MB_*` threshold and retries the next GPU after a CUDA out-of-memory load failure.
+If all four GPUs are unavailable, the website asks the expert to retry in five minutes. A loaded worker is also
+unloaded after 60 seconds without another patient response (`STUDY_MODEL_IDLE_TIMEOUT_SECONDS=60`). TOPAS uses the
+bundled standalone implementation and the artifact paths configured in `.env`.
 
 Useful checks:
 

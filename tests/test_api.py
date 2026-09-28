@@ -291,6 +291,38 @@ def test_patient_farewell_ends_without_another_therapist_response(monkeypatch, t
         assert [message["role"] for message in panel["messages"]] == ["therapist", "patient"]
 
 
+def test_gpu_capacity_failure_returns_five_minute_retry_message(monkeypatch, tmp_path):
+    with load_client(monkeypatch, tmp_path) as client:
+        app_module = sys.modules["server.app"]
+
+        class FullGPUAllocator:
+            def candidates(self, runtime, excluded=None):
+                del runtime, excluded
+                return []
+
+        app_module.INFERENCE_MANAGER.mode = "real"
+        app_module.INFERENCE_MANAGER.gpu_allocator = FullGPUAllocator()
+        headers = login(client, "EXPERT-5834", "capacity-test@example.org")
+        profile = client.get("/api/profiles", headers=headers).json()["profiles"][0]
+        study = client.post(
+            "/api/studies", headers=headers, json={"profile_id": profile["id"]}
+        ).json()["study"]
+        panel = study["panels"][0]
+        started = client.post(
+            f"/api/studies/{study['id']}/panels/{panel['id']}/start",
+            headers=headers,
+            json={"client_request_id": "capacity-start"},
+        )
+        assert started.status_code == 200
+        panel = wait_for_panel(client, headers, study["id"], panel["id"])
+        assert panel["job"]["status"] == "failed"
+        assert panel["job"]["error_code"] == "server_gpu_full"
+        assert panel["job"]["message"] == (
+            "The server is currently full. Please retry again in 5 minutes."
+        )
+        assert panel["job"]["retry_after_seconds"] == 300
+
+
 def test_leaving_unloads_without_ending_and_next_patient_pauses_previous(monkeypatch, tmp_path):
     with load_client(monkeypatch, tmp_path) as client:
         app_module = sys.modules["server.app"]

@@ -22,6 +22,15 @@ ENVIRONMENTS = {
     "sweet_rl": os.getenv("STUDY_CONDA_ENV_SWEET_RL", "sweet_rl"),
 }
 
+try:
+    GPU_ORDER = tuple(
+        int(value.strip())
+        for value in os.getenv("STUDY_GPU_ORDER", "0,1,2,3").split(",")
+        if value.strip()
+    )
+except ValueError:
+    GPU_ORDER = ()
+
 ARCHER_CHECKPOINT = Path(
     os.getenv("STUDY_ARCHER_CHECKPOINT", str(MODEL_ROOT / "archer" / "epoch=9-step=13294.ckpt"))
 ).expanduser().resolve()
@@ -134,9 +143,33 @@ def main() -> int:
 
     gpu_command = shutil.which("nvidia-smi")
     if gpu_command:
-        result = subprocess.run([gpu_command, "-L"], capture_output=True, text=True, timeout=15)
-        print("\nVisible GPUs:")
+        result = subprocess.run(
+            [
+                gpu_command,
+                "--query-gpu=index,name,memory.total,memory.free",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        print("\nVisible GPUs (index, name, total MiB, free MiB):")
         print(result.stdout.strip() or result.stderr.strip() or "None")
+        visible_indices: set[int] = set()
+        for line in result.stdout.splitlines():
+            try:
+                visible_indices.add(int(line.split(",", maxsplit=1)[0].strip()))
+            except (ValueError, IndexError):
+                continue
+        if not GPU_ORDER or len(set(GPU_ORDER)) != len(GPU_ORDER):
+            print("[INVALID] STUDY_GPU_ORDER must contain unique numeric GPU indices")
+            failures.append("GPU order")
+        else:
+            missing_gpus = [gpu for gpu in GPU_ORDER if gpu not in visible_indices]
+            print(f"Configured GPU order: {','.join(map(str, GPU_ORDER))}")
+            if missing_gpus:
+                print(f"[MISSING] Configured GPU indices: {missing_gpus}")
+                failures.append("Configured GPUs")
     else:
         print("[MISSING] nvidia-smi")
         failures.append("nvidia-smi")
