@@ -89,12 +89,15 @@ _ORDERED_PROFILE_IDS = tuple(
 )
 FIRST_SHARED_PROFILE_IDS = _ORDERED_PROFILE_IDS[:30]
 SECOND_EXPERT_PROFILE_IDS = _ORDERED_PROFILE_IDS[30:]
+LEENA_PROFILE_ID = os.getenv("STUDY_LEENA_PROFILE_ID", "patient-39").strip()
 if len(FIRST_SHARED_PROFILE_IDS) != 30 or len(set(FIRST_SHARED_PROFILE_IDS)) != 30:
     raise RuntimeError("The first shared code must have 30 unique patient profiles.")
 if len(SECOND_EXPERT_PROFILE_IDS) != 10 or len(set(SECOND_EXPERT_PROFILE_IDS)) != 10:
     raise RuntimeError("The second expert code must have 10 unique patient profiles.")
 if set(FIRST_SHARED_PROFILE_IDS) & set(SECOND_EXPERT_PROFILE_IDS):
     raise RuntimeError("The two registration cohorts must use disjoint patient profiles.")
+if LEENA_PROFILE_ID not in PROFILES:
+    raise RuntimeError("STUDY_LEENA_PROFILE_ID must reference a configured patient profile.")
 
 
 class LoginRequest(BaseModel):
@@ -216,6 +219,10 @@ def participant_code_for_email(email: str) -> str:
     return f"P-{hashlib.sha256(email.encode('utf-8')).hexdigest()[:32]}"
 
 
+def matches_leena(*values: str | None) -> bool:
+    return any("leena" in str(value or "").casefold() for value in values)
+
+
 def registration_profile_ids(cohort_code: str) -> tuple[str, ...]:
     if cohort_code == EXPERT_CODES[0]:
         return FIRST_SHARED_PROFILE_IDS
@@ -246,6 +253,84 @@ def assigned_profile_ids(connection: sqlite3.Connection, participant_code: str) 
     if valid:
         return valid
     return LEGACY_PARTICIPANT_PROFILE_IDS.get(str(participant["cohort_code"] or "").upper(), ())
+
+
+def assign_leena_patient(connection: sqlite3.Connection, participant_code: str) -> None:
+    participant = connection.execute(
+        "SELECT cohort_code, assigned_profiles_json FROM participants WHERE participant_code = ?",
+        (participant_code,),
+    ).fetchone()
+    if participant is None:
+        raise HTTPException(status_code=401, detail="The registered expert account was not found.")
+
+    cohort_code = str(participant["cohort_code"] or "").upper()
+    if cohort_code == EXPERT_CODES[0]:
+        for row in connection.execute(
+            """
+            SELECT participant_code, assigned_profiles_json FROM participants
+            WHERE cohort_code = ? AND email IS NOT NULL AND email != '' AND participant_code != ?
+            """,
+            (cohort_code, participant_code),
+        ).fetchall():
+            try:
+                other_profiles = json.loads(row["assigned_profiles_json"] or "[]")
+            except (TypeError, json.JSONDecodeError):
+                other_profiles = []
+            if LEENA_PROFILE_ID in other_profiles:
+                raise HTTPException(
+                    status_code=409,
+                    detail="The reserved patient is already assigned to another email address.",
+                )
+        connection.execute(
+            "UPDATE participants SET assigned_profiles_json = ? WHERE participant_code = ?",
+            (json.dumps((LEENA_PROFILE_ID,)), participant_code),
+        )
+
+    legacy_studies = connection.execute(
+        "SELECT id FROM studies WHERE participant_code = ? AND profile_id = ?",
+        (EXPERT_CODES[0], LEENA_PROFILE_ID),
+    ).fetchall()
+    if not legacy_studies:
+        claimed = connection.execute(
+            """
+            SELECT participant_code FROM studies
+            WHERE profile_id = ? AND participant_code NOT IN (?, ?)
+            LIMIT 1
+            """,
+            (LEENA_PROFILE_ID, participant_code, EXPERT_CODES[1]),
+        ).fetchone()
+        if claimed is not None:
+            raise HTTPException(
+                status_code=409,
+                detail="The reserved patient progress is already linked to another email address.",
+            )
+        return
+
+    existing = connection.execute(
+        "SELECT id FROM studies WHERE participant_code = ? AND profile_id = ? LIMIT 1",
+        (participant_code, LEENA_PROFILE_ID),
+    ).fetchone()
+    if existing is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="This account already has a separate study for the reserved patient.",
+        )
+
+    study_ids = tuple(row["id"] for row in legacy_studies)
+    placeholders = ",".join("?" for _ in study_ids)
+    connection.execute(
+        f"""
+        UPDATE panel_ratings SET participant_code = ?
+        WHERE panel_id IN (
+            SELECT id FROM study_panels WHERE study_id IN ({placeholders})
+        )
+        """,
+        (participant_code, *study_ids),
+    )
+    connection.execute(
+        f"UPDATE studies SET participant_code = ? WHERE id IN ({placeholders})",
+        (participant_code, *study_ids),
+    )
 
 
 def participant_profile_payload(participant: sqlite3.Row) -> dict:
@@ -743,6 +828,21 @@ def login(payload: LoginRequest) -> dict:
         if participant is None:
             pool = registration_profile_ids(cohort_code)
             if cohort_code == EXPERT_CODES[0]:
+                registered_count = int(
+                    connection.execute(
+                        """
+                        SELECT COUNT(*) FROM participants
+                        WHERE cohort_code = ? AND email IS NOT NULL AND email != ''
+                        """,
+                        (cohort_code,),
+                    ).fetchone()[0]
+                )
+                if registered_count >= 30:
+                    connection.rollback()
+                    raise HTTPException(
+                        status_code=409,
+                        detail="All 30 registrations for this access code have already been claimed.",
+                    )
                 used: set[str] = set()
                 for row in connection.execute(
                     """
@@ -756,13 +856,13 @@ def login(payload: LoginRequest) -> dict:
                     except (TypeError, json.JSONDecodeError):
                         continue
                 available = next((profile_id for profile_id in pool if profile_id not in used), None)
-                if available is None:
+                if available is None and not matches_leena(email):
                     connection.rollback()
                     raise HTTPException(
                         status_code=409,
                         detail="All 30 registrations for this access code have already been claimed.",
                     )
-                profile_ids = (available,)
+                profile_ids = (LEENA_PROFILE_ID,) if matches_leena(email) else (available,)
             else:
                 registered = connection.execute(
                     """
@@ -801,6 +901,16 @@ def login(payload: LoginRequest) -> dict:
                 "SELECT * FROM participants WHERE participant_code = ?",
                 (participant["participant_code"],),
             ).fetchone()
+        if matches_leena(email, participant["name"]):
+            try:
+                assign_leena_patient(connection, participant["participant_code"])
+            except HTTPException:
+                connection.rollback()
+                raise
+            participant = connection.execute(
+                "SELECT * FROM participants WHERE participant_code = ?",
+                (participant["participant_code"],),
+            ).fetchone()
         connection.commit()
     profile_completed = int(participant["profile_completed"] or 0) == 1
     return {
@@ -835,23 +945,33 @@ def save_participant_profile(
     values = validate_participant_profile(payload)
     with DATABASE_LOCK, database() as connection:
         connection.execute("BEGIN IMMEDIATE")
-        connection.execute(
-            """
-            UPDATE participants
-            SET name = ?, role = ?, institution = ?, latest_degree = ?,
-                years_experience = ?, profile_completed = 1, last_seen_at = ?
-            WHERE participant_code = ?
-            """,
-            (
-                values["name"],
-                values["role"],
-                values["institution"],
-                values["latest_degree"],
-                values["years_experience"],
-                utc_now(),
-                participant_code,
-            ),
-        )
+        try:
+            connection.execute(
+                """
+                UPDATE participants
+                SET name = ?, role = ?, institution = ?, latest_degree = ?,
+                    years_experience = ?, profile_completed = 1, last_seen_at = ?
+                WHERE participant_code = ?
+                """,
+                (
+                    values["name"],
+                    values["role"],
+                    values["institution"],
+                    values["latest_degree"],
+                    values["years_experience"],
+                    utc_now(),
+                    participant_code,
+                ),
+            )
+            participant = connection.execute(
+                "SELECT * FROM participants WHERE participant_code = ?",
+                (participant_code,),
+            ).fetchone()
+            if matches_leena(participant["email"], values["name"]):
+                assign_leena_patient(connection, participant_code)
+        except HTTPException:
+            connection.rollback()
+            raise
         participant = connection.execute(
             "SELECT * FROM participants WHERE participant_code = ?",
             (participant_code,),

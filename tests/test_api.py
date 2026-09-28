@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 import sqlite3
 import sys
 import time
@@ -522,6 +523,158 @@ def test_studies_are_private_and_mapping_is_stable(monkeypatch, tmp_path):
             },
         )
         assert unknown_login.status_code == 401
+
+
+def test_leena_email_receives_reserved_patient_and_preserved_progress(monkeypatch, tmp_path):
+    with load_client(monkeypatch, tmp_path) as client:
+        app_module = sys.modules["server.app"]
+        now = "2026-09-28T10:00:00.000Z"
+        study_id = "legacy-leena-study"
+        with app_module.database() as connection:
+            connection.execute(
+                """
+                INSERT INTO participants(
+                    participant_code, created_at, last_seen_at, cohort_code,
+                    assigned_profiles_json, profile_completed
+                ) VALUES (?, ?, ?, ?, ?, 0)
+                """,
+                (
+                    app_module.EXPERT_CODES[0],
+                    now,
+                    now,
+                    app_module.EXPERT_CODES[0],
+                    json.dumps(app_module.LEGACY_PARTICIPANT_PROFILE_IDS[app_module.EXPERT_CODES[0]]),
+                ),
+            )
+            connection.execute(
+                """
+                INSERT INTO studies(
+                    id, participant_code, profile_id, status, created_at, updated_at
+                ) VALUES (?, ?, ?, 'active', ?, ?)
+                """,
+                (
+                    study_id,
+                    app_module.EXPERT_CODES[0],
+                    app_module.LEENA_PROFILE_ID,
+                    now,
+                    now,
+                ),
+            )
+            for index, (label, method) in enumerate(
+                zip(app_module.PANEL_LABELS, app_module.METHOD_KEYS)
+            ):
+                panel_id = f"legacy-leena-panel-{index}"
+                connection.execute(
+                    """
+                    INSERT INTO study_panels(
+                        id, study_id, label, method_key, display_order, ended_at,
+                        termination_reason
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        panel_id,
+                        study_id,
+                        label,
+                        method,
+                        index,
+                        now if index < 3 else None,
+                        "expert_ended" if index < 3 else None,
+                    ),
+                )
+                if index == 0:
+                    connection.execute(
+                        """
+                        INSERT INTO panel_messages(
+                            panel_id, role, content, client_message_id, created_at
+                        ) VALUES (?, 'therapist', ?, ?, ?)
+                        """,
+                        (panel_id, "Preserved Leena transcript", "legacy-leena-message", now),
+                    )
+                if index < 3:
+                    connection.execute(
+                        """
+                        INSERT INTO panel_ratings(
+                            id, panel_id, participant_code, scores_json, total_score,
+                            comments, submitted_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            f"legacy-leena-rating-{index}",
+                            panel_id,
+                            app_module.EXPERT_CODES[0],
+                            "{}",
+                            30 + index,
+                            f"Preserved rating {index + 1}",
+                            now,
+                        ),
+                    )
+
+        headers = login(client, "EXPERT-5834", "Dr.LeEnA@example.org")
+        profiles = client.get("/api/profiles", headers=headers).json()["profiles"]
+        assert len(profiles) == 1
+        assert profiles[0]["id"] == app_module.LEENA_PROFILE_ID
+        assert profiles[0]["display_number"] == 1
+        assert profiles[0]["display_name"] == "Patient 1"
+        assert profiles[0]["study"]["completed_sessions"] == 3
+
+        resumed = client.get(f"/api/studies/{study_id}", headers=headers)
+        assert resumed.status_code == 200
+        study = resumed.json()["study"]
+        assert study["profile"]["display_number"] == 1
+        assert study["completed_sessions"] == 3
+        assert study["panels"][0]["messages"][0]["content"] == "Preserved Leena transcript"
+        assert study["panels"][0]["rating"]["total_score"] == 30
+
+        with app_module.database() as connection:
+            participant = connection.execute(
+                "SELECT participant_code FROM participants WHERE lower(email) = ?",
+                ("dr.leena@example.org",),
+            ).fetchone()
+            migrated_study = connection.execute(
+                "SELECT participant_code FROM studies WHERE id = ?", (study_id,)
+            ).fetchone()
+            migrated_ratings = connection.execute(
+                """
+                SELECT DISTINCT r.participant_code
+                FROM panel_ratings AS r
+                JOIN study_panels AS p ON p.id = r.panel_id
+                WHERE p.study_id = ?
+                """,
+                (study_id,),
+            ).fetchall()
+        assert migrated_study["participant_code"] == participant["participant_code"]
+        assert [row["participant_code"] for row in migrated_ratings] == [
+            participant["participant_code"]
+        ]
+
+
+def test_leena_name_match_is_case_insensitive(monkeypatch, tmp_path):
+    with load_client(monkeypatch, tmp_path) as client:
+        first = client.post(
+            "/api/auth/login",
+            json={
+                "email": "reserved-case@example.org",
+                "access_code": TEST_ACCESS_CODES["EXPERT-5834"],
+            },
+        )
+        assert first.status_code == 200
+        headers = {"Authorization": f"Bearer {first.json()['token']}"}
+        saved = client.post(
+            "/api/auth/profile",
+            headers=headers,
+            json={
+                "name": "Dr LEENA Example",
+                "role": "Clinical psychologist",
+                "institution": "Test Institute",
+                "latest_degree": "PhD",
+                "years_experience": 12,
+            },
+        )
+        assert saved.status_code == 200
+        profiles = client.get("/api/profiles", headers=headers).json()["profiles"]
+        assert len(profiles) == 1
+        assert profiles[0]["id"] == sys.modules["server.app"].LEENA_PROFILE_ID
+        assert profiles[0]["display_name"] == "Patient 1"
 
 
 def test_legacy_finished_study_is_migrated_for_sequential_ratings(monkeypatch, tmp_path):
