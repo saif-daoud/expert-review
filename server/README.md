@@ -46,6 +46,20 @@ python inspect_db.py
 python inspect_db.py --study STUDY_UUID --messages
 ```
 
+To reset test activity while retaining a specific partially completed study,
+stop the API and run the reset first without `--apply`. The command refuses to
+continue unless the preserved study has exactly the expected number of ratings
+and creates a timestamped SQLite backup before changing anything:
+
+```bash
+python reset_db.py --keep-study STUDY_UUID --expected-ratings 3
+python reset_db.py --keep-study STUDY_UUID --expected-ratings 3 --apply
+```
+
+Completed sessions in the preserved study remain unchanged. Any unfinished
+panel in that study is cleared so it can be started cleanly; all other test
+studies and participant registrations are removed.
+
 Stop the tunnel and API with:
 
 ```bash

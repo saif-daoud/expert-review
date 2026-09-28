@@ -159,6 +159,19 @@ python inspect_db.py --study STUDY_UUID --show-methods
 
 Only use `--show-methods` for administrative checks because it reveals the blinded assignment.
 
+For a selective reset that preserves one study and its three rated sessions,
+stop the API, preview the operation, and then explicitly apply it:
+
+```bash
+cd ~/clean-env/server
+set -a; source .env; set +a
+python reset_db.py --keep-study STUDY_UUID --expected-ratings 3
+python reset_db.py --keep-study STUDY_UUID --expected-ratings 3 --apply
+```
+
+The reset creates a timestamped database backup, deletes other test activity,
+and clears only the unfinished panels of the preserved study.
+
 ## Automated tests
 
 From `interface/cbt-live-interaction/` on the local machine:
