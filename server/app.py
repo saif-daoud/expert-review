@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -40,7 +40,7 @@ SERVER_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = SERVER_DIR.parent
 FRONTEND_DIR = PROJECT_DIR / "frontend"
 DEFAULT_DB_PATH = SERVER_DIR / "data" / "study.sqlite3"
-ACCESS_CODE = os.getenv("STUDY_ACCESS_CODE", "").strip()
+LEGACY_ACCESS_CODE = os.getenv("STUDY_ACCESS_CODE", "").strip()
 TOKEN_SECRET = os.getenv("STUDY_TOKEN_SECRET", "").strip()
 TOKEN_TTL_SECONDS = int(os.getenv("STUDY_TOKEN_TTL_SECONDS", str(12 * 60 * 60)))
 DATABASE_PATH = Path(os.getenv("STUDY_DB_PATH", str(DEFAULT_DB_PATH))).expanduser().resolve()
@@ -76,6 +76,10 @@ EXPERT_CODES = (
     os.getenv("STUDY_EXPERT_1_CODE", "EXPERT-5834").strip().upper(),
     os.getenv("STUDY_EXPERT_2_CODE", "EXPERT-9271").strip().upper(),
 )
+EXPERT_ACCESS_CODES = {
+    EXPERT_CODES[0]: os.getenv("STUDY_EXPERT_1_ACCESS_CODE", LEGACY_ACCESS_CODE).strip(),
+    EXPERT_CODES[1]: os.getenv("STUDY_EXPERT_2_ACCESS_CODE", "").strip(),
+}
 LEGACY_PARTICIPANT_PROFILE_IDS = {
     code: tuple(profile_id for profile_id, profile in PROFILES.items() if profile["assignment_group"] == group)
     for group, code in enumerate(EXPERT_CODES, start=1)
@@ -104,7 +108,6 @@ for label, profile_ids, expected_per_condition in (
 
 
 class LoginRequest(BaseModel):
-    participant_code: str
     email: str
     access_code: str
 
@@ -229,6 +232,13 @@ def registration_profile_ids(cohort_code: str) -> tuple[str, ...]:
     if cohort_code == EXPERT_CODES[1]:
         return SECOND_EXPERT_PROFILE_IDS
     return ()
+
+
+def cohort_for_access_code(access_code: str) -> str:
+    for cohort_code, configured_code in EXPERT_ACCESS_CODES.items():
+        if configured_code and hmac.compare_digest(access_code, configured_code):
+            return cohort_code
+    return ""
 
 
 def assigned_profile_ids(connection: sqlite3.Connection, participant_code: str) -> tuple[str, ...]:
@@ -663,8 +673,12 @@ INFERENCE_MANAGER = InferenceManager(
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     initialize_database()
-    if not ACCESS_CODE:
-        raise RuntimeError("STUDY_ACCESS_CODE is required.")
+    if not all(EXPERT_ACCESS_CODES.values()):
+        raise RuntimeError(
+            "STUDY_EXPERT_1_ACCESS_CODE and STUDY_EXPERT_2_ACCESS_CODE are required."
+        )
+    if len(set(EXPERT_ACCESS_CODES.values())) != 2:
+        raise RuntimeError("The two study access codes must be different.")
     if len(TOKEN_SECRET) < 32:
         raise RuntimeError("STUDY_TOKEN_SECRET is required and must contain at least 32 characters.")
     if INFERENCE_MODE not in {"real", "static"}:
@@ -717,18 +731,11 @@ def health() -> dict:
 
 @app.post("/api/auth/login")
 def login(payload: LoginRequest) -> dict:
-    cohort_code = payload.participant_code.strip().upper()
     email = normalize_email(payload.email)
-    if not PARTICIPANT_CODE_PATTERN.fullmatch(cohort_code):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Participant code must contain 2-64 letters, numbers, dots, underscores, or hyphens.",
-        )
-    if cohort_code not in EXPERT_CODES:
-        raise HTTPException(status_code=401, detail="The participant code is incorrect.")
     if not EMAIL_PATTERN.fullmatch(email):
         raise HTTPException(status_code=422, detail="Enter a valid email address.")
-    if not hmac.compare_digest(payload.access_code, ACCESS_CODE):
+    cohort_code = cohort_for_access_code(payload.access_code)
+    if not cohort_code:
         raise HTTPException(status_code=401, detail="The access code is incorrect.")
     now = utc_now()
     with DATABASE_LOCK, database() as connection:
@@ -741,7 +748,7 @@ def login(payload: LoginRequest) -> dict:
             connection.rollback()
             raise HTTPException(
                 status_code=403,
-                detail="This email is registered with a different participant code.",
+                detail="This email is registered with a different study access code.",
             )
         if participant is None:
             pool = registration_profile_ids(cohort_code)
@@ -763,7 +770,7 @@ def login(payload: LoginRequest) -> dict:
                     connection.rollback()
                     raise HTTPException(
                         status_code=409,
-                        detail="All 30 registrations for this participant code have already been claimed.",
+                        detail="All 30 registrations for this access code have already been claimed.",
                     )
                 profile_ids = (available,)
             else:
@@ -778,7 +785,7 @@ def login(payload: LoginRequest) -> dict:
                     connection.rollback()
                     raise HTTPException(
                         status_code=409,
-                        detail="This participant code is already registered to an email address.",
+                        detail="This access code is already registered to an email address.",
                     )
                 profile_ids = pool
             participant_code = participant_code_for_email(email)
@@ -808,7 +815,6 @@ def login(payload: LoginRequest) -> dict:
     profile_completed = int(participant["profile_completed"] or 0) == 1
     return {
         "token": create_token(participant["participant_code"]),
-        "participant_code": cohort_code,
         "email": email,
         "profile_required": not profile_completed,
         "profile": participant_profile_payload(participant) if profile_completed else None,
@@ -825,7 +831,6 @@ def auth_me(participant_code: str = Depends(require_registered_participant)) -> 
         ).fetchone()
     profile_completed = int(participant["profile_completed"] or 0) == 1
     return {
-        "participant_code": participant["cohort_code"],
         "email": participant["email"],
         "profile_required": not profile_completed,
         "profile": participant_profile_payload(participant) if profile_completed else None,

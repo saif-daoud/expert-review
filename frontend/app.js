@@ -7,13 +7,11 @@ const ctrsRubric = window.CTRS_RUBRIC || [];
 
 const storageKeys = {
   token: "cbt-live/token",
-  participant: "cbt-live/participant",
   email: "cbt-live/email"
 };
-const incompletePatientWarning = "Your input for this patient is incomplete. Please finish the remaining therapist baseline(s) and submit their ratings before leaving.";
+const incompletePatientWarning = "Your input for this patient is incomplete. Please finish the remaining simulator baseline(s) and submit their ratings before leaving.";
 const state = {
   token: sessionStorage.getItem(storageKeys.token) || "",
-  participant: sessionStorage.getItem(storageKeys.participant) || "",
   email: sessionStorage.getItem(storageKeys.email) || "",
   profiles: [],
   study: null,
@@ -35,7 +33,6 @@ const el = {
   },
   connection: document.getElementById("connection-status"),
   loginForm: document.getElementById("login-form"),
-  participant: document.getElementById("participant-code"),
   email: document.getElementById("email-address"),
   access: document.getElementById("access-code"),
   loginButton: document.getElementById("login-button"),
@@ -155,14 +152,12 @@ function clearPoll() {
 function signOut() {
   clearPoll();
   state.token = "";
-  state.participant = "";
   state.email = "";
   state.profiles = [];
   state.study = null;
   state.ratingPanelId = null;
   state.pendingActions.clear();
   sessionStorage.removeItem(storageKeys.token);
-  sessionStorage.removeItem(storageKeys.participant);
   sessionStorage.removeItem(storageKeys.email);
   el.access.value = "";
   el.panelHost.replaceChildren();
@@ -737,16 +732,13 @@ el.loginForm.addEventListener("submit", async event => {
       method: "POST",
       skipAuth: true,
       body: JSON.stringify({
-        participant_code: el.participant.value.trim(),
         email: el.email.value.trim(),
         access_code: el.access.value
       })
     });
     state.token = payload.token;
-    state.participant = payload.participant_code;
     state.email = payload.email;
     sessionStorage.setItem(storageKeys.token, state.token);
-    sessionStorage.setItem(storageKeys.participant, state.participant);
     sessionStorage.setItem(storageKeys.email, state.email);
     if (payload.profile_required) showExpertProfile(payload.profile);
     else await loadProfiles();
@@ -831,13 +823,10 @@ async function boot() {
   buildRatingItems();
   checkHealth();
   if (state.token) {
-    el.participant.value = state.participant;
     el.email.value = state.email;
     try {
       const account = await api("/api/auth/me");
-      state.participant = account.participant_code || state.participant;
       state.email = account.email || state.email;
-      sessionStorage.setItem(storageKeys.participant, state.participant);
       sessionStorage.setItem(storageKeys.email, state.email);
       if (account.profile_required) showExpertProfile(account.profile);
       else await loadProfiles();

@@ -2,8 +2,8 @@
 
 This package contains the real six-therapist study website and its rootless GPU API.
 
-- The first participant code is shared by up to 30 email registrations. Each registered expert receives one unique patient (15 anxiety and 15 depression profiles across the cohort).
-- The second participant code is restricted to one email and receives 10 patients (5 anxiety and 5 depression profiles).
+- The first access code is shared by up to 30 email registrations. Each registered expert receives one unique patient (15 anxiety and 15 depression profiles across the cohort).
+- The second access code is restricted to one email and receives 10 patients (5 anxiety and 5 depression profiles).
 - First-time users complete a professional profile; returning users resume under their normalized email address.
 - Each patient starts on a full profile page, followed by six sequential blinded sessions (`Therapist A` through `Therapist F`).
 - After every session, the expert must submit all 11 CTRS scores before the next therapist unlocks.
@@ -87,9 +87,8 @@ chmod 600 .env
 python -c "import secrets; print(secrets.token_urlsafe(48))"
 ```
 
-Edit `.env` and replace `STUDY_ACCESS_CODE` and `STUDY_TOKEN_SECRET`; use the generated random string for the token
-secret. `STUDY_EXPERT_1_CODE` is the shared referral code (up to 30 emails), while
-`STUDY_EXPERT_2_CODE` is reserved for one email with ten patients. Confirm all model-artifact paths, Conda environment names, GPU indices, public website origin, and
+Edit `.env` and replace `STUDY_EXPERT_1_ACCESS_CODE`, `STUDY_EXPERT_2_ACCESS_CODE`, and `STUDY_TOKEN_SECRET`; use the generated random string for the token
+secret. The first access code is shared by up to 30 referred experts, while the second is reserved for one email with ten patients. The `STUDY_EXPERT_*_CODE` values are internal legacy cohort identifiers and are not entered on the website. Confirm all model-artifact paths, Conda environment names, GPU indices, public website origin, and
 optional ngrok static domain. Then validate paths and environments without loading a model:
 
 ```bash

@@ -7,10 +7,16 @@ import time
 
 from fastapi.testclient import TestClient
 
+TEST_ACCESS_CODES = {
+    "EXPERT-5834": "shared-referral-access-code",
+    "EXPERT-9271": "second-expert-access-code",
+}
+
 
 def load_client(monkeypatch, tmp_path, max_session_turns=50):
     monkeypatch.setenv("STUDY_DB_PATH", str(tmp_path / "study.sqlite3"))
-    monkeypatch.setenv("STUDY_ACCESS_CODE", "test-access-code")
+    monkeypatch.setenv("STUDY_EXPERT_1_ACCESS_CODE", TEST_ACCESS_CODES["EXPERT-5834"])
+    monkeypatch.setenv("STUDY_EXPERT_2_ACCESS_CODE", TEST_ACCESS_CODES["EXPERT-9271"])
     monkeypatch.setenv("STUDY_TOKEN_SECRET", "test-token-secret-that-is-not-used-in-production")
     monkeypatch.setenv("STUDY_ALLOWED_ORIGINS", "http://127.0.0.1:5500")
     monkeypatch.setenv("STUDY_SERVE_FRONTEND", "false")
@@ -30,9 +36,8 @@ def login(
     response = client.post(
         "/api/auth/login",
         json={
-            "participant_code": participant_code,
             "email": email,
-            "access_code": "test-access-code",
+            "access_code": TEST_ACCESS_CODES[participant_code],
         },
     )
     assert response.status_code == 200
@@ -54,9 +59,8 @@ def login(
     resumed = client.post(
         "/api/auth/login",
         json={
-            "participant_code": participant_code,
             "email": email,
-            "access_code": "test-access-code",
+            "access_code": TEST_ACCESS_CODES[participant_code],
         },
     )
     assert resumed.status_code == 200
@@ -78,9 +82,8 @@ def wait_for_panel(client: TestClient, headers: dict[str, str], study_id: str, p
 def test_first_login_collects_professional_profile_and_returning_email_skips_it(monkeypatch, tmp_path):
     with load_client(monkeypatch, tmp_path) as client:
         credentials = {
-            "participant_code": "EXPERT-5834",
             "email": "Therapist.Expert@example.org",
-            "access_code": "test-access-code",
+            "access_code": TEST_ACCESS_CODES["EXPERT-5834"],
         }
         first = client.post("/api/auth/login", json=credentials)
         assert first.status_code == 200
@@ -423,6 +426,14 @@ def test_studies_are_private_and_mapping_is_stable(monkeypatch, tmp_path):
         assert {profile["id"] for profile in first_profiles + other_shared_profiles}.isdisjoint(
             profile["id"] for profile in second_profiles
         )
+        crossed_access_code = client.post(
+            "/api/auth/login",
+            json={
+                "email": "referral-01@example.org",
+                "access_code": TEST_ACCESS_CODES["EXPERT-9271"],
+            },
+        )
+        assert crossed_access_code.status_code == 403
         app_module = sys.modules["server.app"]
         assert len(app_module.FIRST_SHARED_PROFILE_IDS) == 30
         assert len(app_module.SECOND_EXPERT_PROFILE_IDS) == 10
@@ -481,9 +492,8 @@ def test_studies_are_private_and_mapping_is_stable(monkeypatch, tmp_path):
         exhausted = client.post(
             "/api/auth/login",
             json={
-                "participant_code": "EXPERT-5834",
                 "email": "referral-31@example.org",
-                "access_code": "test-access-code",
+                "access_code": TEST_ACCESS_CODES["EXPERT-5834"],
             },
         )
         assert exhausted.status_code == 409
@@ -492,9 +502,8 @@ def test_studies_are_private_and_mapping_is_stable(monkeypatch, tmp_path):
         second_claim = client.post(
             "/api/auth/login",
             json={
-                "participant_code": "EXPERT-9271",
                 "email": "another-second-expert@example.org",
-                "access_code": "test-access-code",
+                "access_code": TEST_ACCESS_CODES["EXPERT-9271"],
             },
         )
         assert second_claim.status_code == 409
@@ -502,9 +511,8 @@ def test_studies_are_private_and_mapping_is_stable(monkeypatch, tmp_path):
         unknown_login = client.post(
             "/api/auth/login",
             json={
-                "participant_code": "EXPERT-0000",
                 "email": "unknown@example.org",
-                "access_code": "test-access-code",
+                "access_code": "unknown-access-code",
             },
         )
         assert unknown_login.status_code == 401
