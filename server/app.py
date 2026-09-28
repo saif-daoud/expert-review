@@ -51,8 +51,14 @@ PROJECT_DIR = SERVER_DIR.parent
 FRONTEND_DIR = PROJECT_DIR / "frontend"
 DEFAULT_DB_PATH = SERVER_DIR / "data" / "study.sqlite3"
 LEGACY_ACCESS_CODE = os.getenv("STUDY_ACCESS_CODE", "").strip()
+SHARED_ACCESS_CODE = (
+    os.getenv("STUDY_EXPERT_ACCESS_CODE", "").strip()
+    or os.getenv("STUDY_EXPERT_1_ACCESS_CODE", "").strip()
+    or LEGACY_ACCESS_CODE
+)
 TOKEN_SECRET = os.getenv("STUDY_TOKEN_SECRET", "").strip()
 TOKEN_TTL_SECONDS = int(os.getenv("STUDY_TOKEN_TTL_SECONDS", str(12 * 60 * 60)))
+PATIENT_OFFER_TTL_SECONDS = int(os.getenv("STUDY_PATIENT_OFFER_TTL_SECONDS", str(2 * 60 * 60)))
 DATABASE_PATH = Path(os.getenv("STUDY_DB_PATH", str(DEFAULT_DB_PATH))).expanduser().resolve()
 INFERENCE_MODE = os.getenv("STUDY_INFERENCE_MODE", "real").strip().lower()
 MAX_SESSION_TURNS = int(os.getenv("STUDY_MAX_SESSION_TURNS", "50"))
@@ -86,10 +92,6 @@ EXPERT_CODES = (
     os.getenv("STUDY_EXPERT_1_CODE", "EXPERT-5834").strip().upper(),
     os.getenv("STUDY_EXPERT_2_CODE", "EXPERT-9271").strip().upper(),
 )
-EXPERT_ACCESS_CODES = {
-    EXPERT_CODES[0]: os.getenv("STUDY_EXPERT_1_ACCESS_CODE", LEGACY_ACCESS_CODE).strip(),
-    EXPERT_CODES[1]: os.getenv("STUDY_EXPERT_2_ACCESS_CODE", "").strip(),
-}
 LEGACY_PARTICIPANT_PROFILE_IDS = {
     code: tuple(profile_id for profile_id, profile in PROFILES.items() if profile["assignment_group"] == group)
     for group, code in enumerate(EXPERT_CODES, start=1)
@@ -97,15 +99,7 @@ LEGACY_PARTICIPANT_PROFILE_IDS = {
 _ORDERED_PROFILE_IDS = tuple(
     sorted(PROFILES, key=lambda profile_id: int(profile_id.removeprefix("patient-")))
 )
-FIRST_SHARED_PROFILE_IDS = _ORDERED_PROFILE_IDS[:30]
-SECOND_EXPERT_PROFILE_IDS = _ORDERED_PROFILE_IDS[30:]
 LEENA_PROFILE_ID = os.getenv("STUDY_LEENA_PROFILE_ID", "patient-39").strip()
-if len(FIRST_SHARED_PROFILE_IDS) != 30 or len(set(FIRST_SHARED_PROFILE_IDS)) != 30:
-    raise RuntimeError("The first shared code must have 30 unique patient profiles.")
-if len(SECOND_EXPERT_PROFILE_IDS) != 10 or len(set(SECOND_EXPERT_PROFILE_IDS)) != 10:
-    raise RuntimeError("The second expert code must have 10 unique patient profiles.")
-if set(FIRST_SHARED_PROFILE_IDS) & set(SECOND_EXPERT_PROFILE_IDS):
-    raise RuntimeError("The two registration cohorts must use disjoint patient profiles.")
 if LEENA_PROFILE_ID not in PROFILES:
     raise RuntimeError("STUDY_LEENA_PROFILE_ID must reference a configured patient profile.")
 
@@ -233,68 +227,176 @@ def matches_leena(*values: str | None) -> bool:
     return any("leena" in str(value or "").casefold() for value in values)
 
 
-def registration_profile_ids(cohort_code: str) -> tuple[str, ...]:
-    if cohort_code == EXPERT_CODES[0]:
-        return FIRST_SHARED_PROFILE_IDS
-    if cohort_code == EXPERT_CODES[1]:
-        return SECOND_EXPERT_PROFILE_IDS
-    return ()
-
-
-def cohort_for_access_code(access_code: str) -> str:
-    for cohort_code, configured_code in EXPERT_ACCESS_CODES.items():
-        if configured_code and hmac.compare_digest(access_code, configured_code):
-            return cohort_code
-    return ""
-
-
 def assigned_profile_ids(connection: sqlite3.Connection, participant_code: str) -> tuple[str, ...]:
-    participant = connection.execute(
-        "SELECT cohort_code, assigned_profiles_json FROM participants WHERE participant_code = ?",
+    return tuple(
+        row["profile_id"]
+        for row in connection.execute(
+            """
+            SELECT profile_id FROM patient_assignments
+            WHERE participant_code = ?
+            ORDER BY display_order
+            """,
+            (participant_code,),
+        ).fetchall()
+    )
+
+
+def assignment_for_profile(
+    connection: sqlite3.Connection, participant_code: str, profile_id: str
+) -> sqlite3.Row | None:
+    return connection.execute(
+        """
+        SELECT * FROM patient_assignments
+        WHERE participant_code = ? AND profile_id = ?
+        """,
+        (participant_code, profile_id),
+    ).fetchone()
+
+
+def _assignment_has_activity(connection: sqlite3.Connection, participant_code: str, profile_id: str) -> bool:
+    return (
+        connection.execute(
+            """
+            SELECT 1
+            FROM studies AS s
+            JOIN study_panels AS p ON p.study_id = s.id
+            WHERE s.participant_code = ? AND s.profile_id = ?
+              AND (
+                EXISTS (SELECT 1 FROM panel_messages AS m WHERE m.panel_id = p.id)
+                OR EXISTS (SELECT 1 FROM inference_jobs AS j WHERE j.panel_id = p.id)
+                OR EXISTS (SELECT 1 FROM panel_ratings AS r WHERE r.panel_id = p.id)
+              )
+            LIMIT 1
+            """,
+            (participant_code, profile_id),
+        ).fetchone()
+        is not None
+    )
+
+
+def release_unused_offer(
+    connection: sqlite3.Connection, participant_code: str, profile_id: str | None = None
+) -> bool:
+    parameters: list[str] = [participant_code]
+    profile_filter = ""
+    if profile_id:
+        profile_filter = " AND profile_id = ?"
+        parameters.append(profile_id)
+    offer = connection.execute(
+        f"""
+        SELECT * FROM patient_assignments
+        WHERE participant_code = ? AND status = 'offered'{profile_filter}
+        ORDER BY display_order DESC LIMIT 1
+        """,
+        parameters,
+    ).fetchone()
+    if offer is None or _assignment_has_activity(connection, participant_code, offer["profile_id"]):
+        return False
+    connection.execute(
+        "DELETE FROM studies WHERE participant_code = ? AND profile_id = ?",
+        (participant_code, offer["profile_id"]),
+    )
+    connection.execute(
+        "DELETE FROM patient_assignments WHERE profile_id = ? AND participant_code = ?",
+        (offer["profile_id"], participant_code),
+    )
+    return True
+
+
+def cleanup_expired_offers(connection: sqlite3.Connection) -> None:
+    cutoff = datetime.fromtimestamp(
+        time.time() - PATIENT_OFFER_TTL_SECONDS, timezone.utc
+    ).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    expired = connection.execute(
+        """
+        SELECT participant_code, profile_id FROM patient_assignments
+        WHERE status = 'offered' AND updated_at < ?
+        """,
+        (cutoff,),
+    ).fetchall()
+    for offer in expired:
+        release_unused_offer(connection, offer["participant_code"], offer["profile_id"])
+
+
+def _all_assigned_patients_finished(connection: sqlite3.Connection, participant_code: str) -> bool:
+    assignments = assigned_profile_ids(connection, participant_code)
+    if not assignments:
+        return True
+    finished = int(
+        connection.execute(
+            """
+            SELECT COUNT(*) FROM studies
+            WHERE participant_code = ? AND status = 'finished'
+            """,
+            (participant_code,),
+        ).fetchone()[0]
+    )
+    return finished == len(assignments)
+
+
+def allocate_patient_offer(connection: sqlite3.Connection, participant_code: str) -> sqlite3.Row:
+    cleanup_expired_offers(connection)
+    existing_open = connection.execute(
+        """
+        SELECT a.* FROM patient_assignments AS a
+        LEFT JOIN studies AS s
+          ON s.participant_code = a.participant_code AND s.profile_id = a.profile_id
+        WHERE a.participant_code = ? AND COALESCE(s.status, 'active') != 'finished'
+        ORDER BY a.display_order DESC LIMIT 1
+        """,
         (participant_code,),
     ).fetchone()
+    if existing_open is not None:
+        return existing_open
+    if not _all_assigned_patients_finished(connection, participant_code):
+        raise HTTPException(
+            status_code=409,
+            detail="Finish all six therapist sessions and ratings for your current patient first.",
+        )
+    participant = connection.execute(
+        "SELECT email, name FROM participants WHERE participant_code = ?", (participant_code,)
+    ).fetchone()
     if participant is None:
-        return ()
-    try:
-        configured = tuple(json.loads(participant["assigned_profiles_json"] or "[]"))
-    except (TypeError, json.JSONDecodeError):
-        configured = ()
-    valid = tuple(profile_id for profile_id in configured if profile_id in PROFILES)
-    if valid:
-        return valid
-    return LEGACY_PARTICIPANT_PROFILE_IDS.get(str(participant["cohort_code"] or "").upper(), ())
+        raise HTTPException(status_code=401, detail="The registered expert account was not found.")
+    reserved = None if matches_leena(participant["email"], participant["name"]) else LEENA_PROFILE_ID
+    used = {
+        row["profile_id"]
+        for row in connection.execute("SELECT profile_id FROM patient_assignments").fetchall()
+    }
+    profile_id = next(
+        (candidate for candidate in _ORDERED_PROFILE_IDS if candidate not in used and candidate != reserved),
+        None,
+    )
+    if profile_id is None:
+        raise HTTPException(
+            status_code=409,
+            detail="All patient profiles are currently assigned. Please try again later.",
+        )
+    display_order = int(
+        connection.execute(
+            "SELECT COALESCE(MAX(display_order), 0) + 1 FROM patient_assignments WHERE participant_code = ?",
+            (participant_code,),
+        ).fetchone()[0]
+    )
+    now = utc_now()
+    connection.execute(
+        """
+        INSERT INTO patient_assignments(
+            profile_id, participant_code, display_order, status, offered_at, updated_at
+        ) VALUES (?, ?, ?, 'offered', ?, ?)
+        """,
+        (profile_id, participant_code, display_order, now, now),
+    )
+    return assignment_for_profile(connection, participant_code, profile_id)
 
 
 def assign_leena_patient(connection: sqlite3.Connection, participant_code: str) -> None:
     participant = connection.execute(
-        "SELECT cohort_code, assigned_profiles_json FROM participants WHERE participant_code = ?",
+        "SELECT email, name FROM participants WHERE participant_code = ?",
         (participant_code,),
     ).fetchone()
     if participant is None:
         raise HTTPException(status_code=401, detail="The registered expert account was not found.")
-
-    cohort_code = str(participant["cohort_code"] or "").upper()
-    if cohort_code == EXPERT_CODES[0]:
-        for row in connection.execute(
-            """
-            SELECT participant_code, assigned_profiles_json FROM participants
-            WHERE cohort_code = ? AND email IS NOT NULL AND email != '' AND participant_code != ?
-            """,
-            (cohort_code, participant_code),
-        ).fetchall():
-            try:
-                other_profiles = json.loads(row["assigned_profiles_json"] or "[]")
-            except (TypeError, json.JSONDecodeError):
-                other_profiles = []
-            if LEENA_PROFILE_ID in other_profiles:
-                raise HTTPException(
-                    status_code=409,
-                    detail="The reserved patient is already assigned to another email address.",
-                )
-        connection.execute(
-            "UPDATE participants SET assigned_profiles_json = ? WHERE participant_code = ?",
-            (json.dumps((LEENA_PROFILE_ID,)), participant_code),
-        )
 
     legacy_studies = connection.execute(
         "SELECT id FROM studies WHERE participant_code = ? AND profile_id = ?",
@@ -303,16 +405,26 @@ def assign_leena_patient(connection: sqlite3.Connection, participant_code: str) 
     if not legacy_studies:
         claimed = connection.execute(
             """
-            SELECT participant_code FROM studies
-            WHERE profile_id = ? AND participant_code NOT IN (?, ?)
+            SELECT participant_code FROM patient_assignments
+            WHERE profile_id = ? AND participant_code != ?
             LIMIT 1
             """,
-            (LEENA_PROFILE_ID, participant_code, EXPERT_CODES[1]),
+            (LEENA_PROFILE_ID, participant_code),
         ).fetchone()
         if claimed is not None:
             raise HTTPException(
                 status_code=409,
                 detail="The reserved patient progress is already linked to another email address.",
+            )
+        if assignment_for_profile(connection, participant_code, LEENA_PROFILE_ID) is None:
+            now = utc_now()
+            connection.execute(
+                """
+                INSERT INTO patient_assignments(
+                    profile_id, participant_code, display_order, status, offered_at, updated_at
+                ) VALUES (?, ?, 1, 'offered', ?, ?)
+                """,
+                (LEENA_PROFILE_ID, participant_code, now, now),
             )
         return
 
@@ -321,10 +433,14 @@ def assign_leena_patient(connection: sqlite3.Connection, participant_code: str) 
         (participant_code, LEENA_PROFILE_ID),
     ).fetchone()
     if existing is not None:
-        raise HTTPException(
-            status_code=409,
-            detail="This account already has a separate study for the reserved patient.",
-        )
+        return
+
+    for assignment in connection.execute(
+        "SELECT profile_id, status FROM patient_assignments WHERE participant_code = ?",
+        (participant_code,),
+    ).fetchall():
+        if assignment["profile_id"] != LEENA_PROFILE_ID and assignment["status"] == "offered":
+            release_unused_offer(connection, participant_code, assignment["profile_id"])
 
     study_ids = tuple(row["id"] for row in legacy_studies)
     placeholders = ",".join("?" for _ in study_ids)
@@ -340,6 +456,16 @@ def assign_leena_patient(connection: sqlite3.Connection, participant_code: str) 
     connection.execute(
         f"UPDATE studies SET participant_code = ? WHERE id IN ({placeholders})",
         (participant_code, *study_ids),
+    )
+    connection.execute("DELETE FROM patient_assignments WHERE profile_id = ?", (LEENA_PROFILE_ID,))
+    now = utc_now()
+    connection.execute(
+        """
+        INSERT INTO patient_assignments(
+            profile_id, participant_code, display_order, status, offered_at, updated_at, claimed_at
+        ) VALUES (?, ?, 1, 'claimed', ?, ?, ?)
+        """,
+        (LEENA_PROFILE_ID, participant_code, now, now, now),
     )
 
 
@@ -383,6 +509,18 @@ def initialize_database() -> None:
                 participant_code TEXT PRIMARY KEY,
                 created_at TEXT NOT NULL,
                 last_seen_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS patient_assignments (
+                profile_id TEXT PRIMARY KEY,
+                participant_code TEXT NOT NULL,
+                display_order INTEGER NOT NULL,
+                status TEXT NOT NULL CHECK (status IN ('offered', 'in_progress', 'claimed')),
+                offered_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                claimed_at TEXT,
+                FOREIGN KEY (participant_code) REFERENCES participants(participant_code),
+                UNIQUE (participant_code, display_order)
             );
 
             CREATE TABLE IF NOT EXISTS studies (
@@ -509,6 +647,59 @@ def initialize_database() -> None:
             """,
             (utc_now(),),
         )
+        # Existing studies predate the one-patient-at-a-time allocator. Make
+        # them visible without changing any transcript or rating data.
+        for study in connection.execute(
+            "SELECT * FROM studies ORDER BY participant_code, created_at, id"
+        ).fetchall():
+            if study["profile_id"] not in PROFILES:
+                continue
+            rating = connection.execute(
+                """
+                SELECT MIN(r.submitted_at) AS claimed_at
+                FROM panel_ratings AS r
+                JOIN study_panels AS p ON p.id = r.panel_id
+                WHERE p.study_id = ?
+                """,
+                (study["id"],),
+            ).fetchone()
+            has_activity = connection.execute(
+                """
+                SELECT 1 FROM study_panels AS p
+                WHERE p.study_id = ? AND (
+                    EXISTS (SELECT 1 FROM panel_messages AS m WHERE m.panel_id = p.id)
+                    OR EXISTS (SELECT 1 FROM inference_jobs AS j WHERE j.panel_id = p.id)
+                ) LIMIT 1
+                """,
+                (study["id"],),
+            ).fetchone()
+            status = "claimed" if rating["claimed_at"] else "in_progress" if has_activity else "offered"
+            display_order = int(
+                connection.execute(
+                    """
+                    SELECT COALESCE(MAX(display_order), 0) + 1
+                    FROM patient_assignments WHERE participant_code = ?
+                    """,
+                    (study["participant_code"],),
+                ).fetchone()[0]
+            )
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO patient_assignments(
+                    profile_id, participant_code, display_order, status,
+                    offered_at, updated_at, claimed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    study["profile_id"],
+                    study["participant_code"],
+                    display_order,
+                    status,
+                    study["created_at"],
+                    study["updated_at"],
+                    rating["claimed_at"],
+                ),
+            )
 
 
 def get_study(connection: sqlite3.Connection, study_id: str, participant_code: str) -> sqlite3.Row:
@@ -615,8 +806,8 @@ def serialize_job(connection: sqlite3.Connection, job: sqlite3.Row | None) -> di
 
 def serialize_study(connection: sqlite3.Connection, study: sqlite3.Row) -> dict:
     profile = PROFILES[study["profile_id"]]
-    allowed_ids = assigned_profile_ids(connection, study["participant_code"])
-    display_number = allowed_ids.index(study["profile_id"]) + 1 if study["profile_id"] in allowed_ids else profile["display_number"]
+    assignment = assignment_for_profile(connection, study["participant_code"], study["profile_id"])
+    display_number = int(assignment["display_order"]) if assignment is not None else profile["display_number"]
     current = _current_panel(connection, study["id"])
     current_panel_id = current["id"] if current is not None and study["status"] == "active" else None
     completed_sessions = int(
@@ -767,12 +958,8 @@ INFERENCE_MANAGER = InferenceManager(
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     initialize_database()
-    if not all(EXPERT_ACCESS_CODES.values()):
-        raise RuntimeError(
-            "STUDY_EXPERT_1_ACCESS_CODE and STUDY_EXPERT_2_ACCESS_CODE are required."
-        )
-    if len(set(EXPERT_ACCESS_CODES.values())) != 2:
-        raise RuntimeError("The two study access codes must be different.")
+    if not SHARED_ACCESS_CODE:
+        raise RuntimeError("STUDY_EXPERT_ACCESS_CODE is required.")
     if len(TOKEN_SECRET) < 32:
         raise RuntimeError("STUDY_TOKEN_SECRET is required and must contain at least 32 characters.")
     if INFERENCE_MODE not in {"real", "static"}:
@@ -781,6 +968,8 @@ async def lifespan(_: FastAPI):
         raise RuntimeError("STUDY_MAX_SESSION_TURNS must be at least 1.")
     if len(set(EXPERT_CODES)) != 2 or not all(PARTICIPANT_CODE_PATTERN.fullmatch(code) for code in EXPERT_CODES):
         raise RuntimeError("The two configured expert codes must be distinct valid participant codes.")
+    if PATIENT_OFFER_TTL_SECONDS < 60:
+        raise RuntimeError("STUDY_PATIENT_OFFER_TTL_SECONDS must be at least 60.")
     INFERENCE_MANAGER.start()
     try:
         yield
@@ -828,8 +1017,7 @@ def login(payload: LoginRequest) -> dict:
     email = normalize_email(payload.email)
     if not EMAIL_PATTERN.fullmatch(email):
         raise HTTPException(status_code=422, detail="Enter a valid email address.")
-    cohort_code = cohort_for_access_code(payload.access_code)
-    if not cohort_code:
+    if not hmac.compare_digest(payload.access_code, SHARED_ACCESS_CODE):
         raise HTTPException(status_code=401, detail="The access code is incorrect.")
     now = utc_now()
     with DATABASE_LOCK, database() as connection:
@@ -838,65 +1026,7 @@ def login(payload: LoginRequest) -> dict:
             "SELECT * FROM participants WHERE lower(email) = ?",
             (email,),
         ).fetchone()
-        if participant is not None and participant["cohort_code"] != cohort_code:
-            connection.rollback()
-            raise HTTPException(
-                status_code=403,
-                detail="This email is registered with a different study access code.",
-            )
         if participant is None:
-            pool = registration_profile_ids(cohort_code)
-            if cohort_code == EXPERT_CODES[0]:
-                registered_count = int(
-                    connection.execute(
-                        """
-                        SELECT COUNT(*) FROM participants
-                        WHERE cohort_code = ? AND email IS NOT NULL AND email != ''
-                        """,
-                        (cohort_code,),
-                    ).fetchone()[0]
-                )
-                if registered_count >= 30:
-                    connection.rollback()
-                    raise HTTPException(
-                        status_code=409,
-                        detail="All 30 registrations for this access code have already been claimed.",
-                    )
-                used: set[str] = set()
-                for row in connection.execute(
-                    """
-                    SELECT assigned_profiles_json FROM participants
-                    WHERE cohort_code = ? AND email IS NOT NULL AND email != ''
-                    """,
-                    (cohort_code,),
-                ).fetchall():
-                    try:
-                        used.update(json.loads(row["assigned_profiles_json"] or "[]"))
-                    except (TypeError, json.JSONDecodeError):
-                        continue
-                available = next((profile_id for profile_id in pool if profile_id not in used), None)
-                if available is None and not matches_leena(email):
-                    connection.rollback()
-                    raise HTTPException(
-                        status_code=409,
-                        detail="All 30 registrations for this access code have already been claimed.",
-                    )
-                profile_ids = (LEENA_PROFILE_ID,) if matches_leena(email) else (available,)
-            else:
-                registered = connection.execute(
-                    """
-                    SELECT participant_code FROM participants
-                    WHERE cohort_code = ? AND email IS NOT NULL AND email != '' LIMIT 1
-                    """,
-                    (cohort_code,),
-                ).fetchone()
-                if registered is not None:
-                    connection.rollback()
-                    raise HTTPException(
-                        status_code=409,
-                        detail="This access code is already registered to an email address.",
-                    )
-                profile_ids = pool
             participant_code = participant_code_for_email(email)
             connection.execute(
                 """
@@ -905,7 +1035,7 @@ def login(payload: LoginRequest) -> dict:
                     profile_completed, created_at, last_seen_at
                 ) VALUES (?, ?, ?, ?, 0, ?, ?)
                 """,
-                (participant_code, email, cohort_code, json.dumps(profile_ids), now, now),
+                (participant_code, email, "SHARED", "[]", now, now),
             )
             participant = connection.execute(
                 "SELECT * FROM participants WHERE participant_code = ?",
@@ -1001,33 +1131,94 @@ def save_participant_profile(
 
 @app.get("/api/profiles")
 def list_profiles(participant_code: str = Depends(require_participant)) -> dict:
-    with database() as connection:
-        existing = {
-            row["profile_id"]: {
-                "id": row["id"],
-                "status": row["status"],
-                "completed_sessions": int(row["completed_sessions"]),
-                "total_sessions": len(PANEL_LABELS),
-            }
-            for row in connection.execute(
-                """
-                SELECT s.id, s.profile_id, s.status, COUNT(r.id) AS completed_sessions
-                FROM studies AS s
-                LEFT JOIN study_panels AS p ON p.study_id = s.id
-                LEFT JOIN panel_ratings AS r ON r.panel_id = p.id
-                WHERE s.participant_code = ?
-                GROUP BY s.id, s.profile_id, s.status
-                """,
-                (participant_code,),
-            ).fetchall()
+    with DATABASE_LOCK, database() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        cleanup_expired_offers(connection)
+        if not assigned_profile_ids(connection, participant_code):
+            allocate_patient_offer(connection, participant_code)
+        result = profiles_payload(connection, participant_code)
+        connection.commit()
+    return result
+
+
+def profiles_payload(connection: sqlite3.Connection, participant_code: str) -> dict:
+    existing = {
+        row["profile_id"]: {
+            "id": row["id"],
+            "status": row["status"],
+            "completed_sessions": int(row["completed_sessions"]),
+            "total_sessions": len(PANEL_LABELS),
         }
-        allowed_ids = assigned_profile_ids(connection, participant_code)
+        for row in connection.execute(
+            """
+            SELECT s.id, s.profile_id, s.status, COUNT(r.id) AS completed_sessions
+            FROM studies AS s
+            LEFT JOIN study_panels AS p ON p.study_id = s.id
+            LEFT JOIN panel_ratings AS r ON r.panel_id = p.id
+            WHERE s.participant_code = ?
+            GROUP BY s.id, s.profile_id, s.status
+            """,
+            (participant_code,),
+        ).fetchall()
+    }
+    assignments = connection.execute(
+        """
+        SELECT profile_id, display_order, status FROM patient_assignments
+        WHERE participant_code = ? ORDER BY display_order
+        """,
+        (participant_code,),
+    ).fetchall()
+    participant = connection.execute(
+        "SELECT email, name FROM participants WHERE participant_code = ?", (participant_code,)
+    ).fetchone()
+    reserved = None if matches_leena(participant["email"], participant["name"]) else LEENA_PROFILE_ID
+    used = {
+        row["profile_id"]
+        for row in connection.execute("SELECT profile_id FROM patient_assignments").fetchall()
+    }
+    has_available = any(
+        profile_id not in used and profile_id != reserved for profile_id in _ORDERED_PROFILE_IDS
+    )
     return {
         "profiles": [
-            profile_card(PROFILES[profile_id], existing.get(profile_id), display_number=index)
-            for index, profile_id in enumerate(allowed_ids, start=1)
-        ]
+            profile_card(
+                PROFILES[row["profile_id"]],
+                existing.get(row["profile_id"]),
+                display_number=int(row["display_order"]),
+            )
+            for row in assignments
+        ],
+        "can_request_next": bool(assignments)
+        and _all_assigned_patients_finished(connection, participant_code)
+        and has_available,
+        "all_patients_assigned": not has_available,
     }
+
+
+@app.post("/api/assignments/next")
+def request_next_patient(participant_code: str = Depends(require_participant)) -> dict:
+    with DATABASE_LOCK, database() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        cleanup_expired_offers(connection)
+        if not _all_assigned_patients_finished(connection, participant_code):
+            connection.rollback()
+            raise HTTPException(
+                status_code=409,
+                detail="Finish all six therapist sessions and ratings for your current patient first.",
+            )
+        allocate_patient_offer(connection, participant_code)
+        result = profiles_payload(connection, participant_code)
+        connection.commit()
+    return result
+
+
+@app.post("/api/assignments/current/release")
+def release_current_patient(participant_code: str = Depends(require_participant)) -> dict:
+    with DATABASE_LOCK, database() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        released = release_unused_offer(connection, participant_code)
+        connection.commit()
+    return {"released": released}
 
 
 @app.post("/api/studies")
@@ -1091,6 +1282,15 @@ def start_panel(
         if panel["ended_at"]:
             connection.rollback()
             raise HTTPException(status_code=409, detail="This session is ready for its CTRS rating.")
+        connection.execute(
+            """
+            UPDATE patient_assignments
+            SET status = CASE WHEN status = 'offered' THEN 'in_progress' ELSE status END,
+                updated_at = ?
+            WHERE participant_code = ? AND profile_id = ?
+            """,
+            (utc_now(), participant_code, study["profile_id"]),
+        )
         duplicate = connection.execute(
             "SELECT * FROM inference_jobs WHERE panel_id = ? AND client_request_id = ?",
             (panel_id, request_id),
@@ -1221,6 +1421,13 @@ def send_message(
                 (now, automatic_reason, panel_id),
             )
         connection.execute("UPDATE studies SET updated_at = ? WHERE id = ?", (now, study_id))
+        connection.execute(
+            """
+            UPDATE patient_assignments SET updated_at = ?
+            WHERE participant_code = ? AND profile_id = ?
+            """,
+            (now, participant_code, study["profile_id"]),
+        )
         connection.commit()
         job = connection.execute("SELECT * FROM inference_jobs WHERE id = ?", (job["id"],)).fetchone()
         result = serialize_job(connection, job)
@@ -1386,6 +1593,14 @@ def rate_panel(
                 comments,
                 now,
             ),
+        )
+        connection.execute(
+            """
+            UPDATE patient_assignments
+            SET status = 'claimed', updated_at = ?, claimed_at = COALESCE(claimed_at, ?)
+            WHERE participant_code = ? AND profile_id = ?
+            """,
+            (now, now, participant_code, study["profile_id"]),
         )
         completed = int(
             connection.execute(

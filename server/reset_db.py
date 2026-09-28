@@ -14,6 +14,7 @@ TABLES = (
     "panel_messages",
     "inference_jobs",
     "panel_ratings",
+    "patient_assignments",
 )
 
 
@@ -31,6 +32,7 @@ def table_counts(connection: sqlite3.Connection) -> dict[str, int]:
     return {
         table: int(connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
         for table in TABLES
+        if table_exists(connection, table)
     }
 
 
@@ -143,6 +145,31 @@ def reset_database(
                 connection.execute("DELETE FROM messages")
             if table_exists(connection, "sessions"):
                 connection.execute("DELETE FROM sessions")
+            if table_exists(connection, "patient_assignments"):
+                connection.execute(
+                    "DELETE FROM patient_assignments WHERE profile_id != ? OR participant_code != ?",
+                    (study["profile_id"], owner),
+                )
+                now = (
+                    datetime.now(timezone.utc)
+                    .isoformat(timespec="milliseconds")
+                    .replace("+00:00", "Z")
+                )
+                connection.execute(
+                    """
+                    INSERT INTO patient_assignments(
+                        profile_id, participant_code, display_order, status,
+                        offered_at, updated_at, claimed_at
+                    ) VALUES (?, ?, 1, 'claimed', ?, ?, ?)
+                    ON CONFLICT(profile_id) DO UPDATE SET
+                        participant_code = excluded.participant_code,
+                        display_order = 1,
+                        status = 'claimed',
+                        updated_at = excluded.updated_at,
+                        claimed_at = COALESCE(patient_assignments.claimed_at, excluded.claimed_at)
+                    """,
+                    (study["profile_id"], owner, study["created_at"], now, now),
+                )
             connection.execute(
                 "DELETE FROM participants WHERE participant_code != ?", (owner,)
             )

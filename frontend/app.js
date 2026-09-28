@@ -14,6 +14,8 @@ const state = {
   token: sessionStorage.getItem(storageKeys.token) || "",
   email: sessionStorage.getItem(storageKeys.email) || "",
   profiles: [],
+  canRequestNext: false,
+  allPatientsAssigned: false,
   study: null,
   view: "login",
   pollTimer: null,
@@ -48,6 +50,9 @@ const el = {
   signOut: document.getElementById("sign-out-button"),
   home: document.getElementById("home-link"),
   profileGrid: document.getElementById("profile-grid"),
+  nextPatientBox: document.getElementById("next-patient-box"),
+  nextPatientNote: document.getElementById("next-patient-note"),
+  nextPatientButton: document.getElementById("next-patient-button"),
   patientBack: document.getElementById("patient-back-button"),
   patientName: document.getElementById("patient-name"),
   patientCondition: document.getElementById("patient-condition"),
@@ -154,6 +159,8 @@ function signOut() {
   state.token = "";
   state.email = "";
   state.profiles = [];
+  state.canRequestNext = false;
+  state.allPatientsAssigned = false;
   state.study = null;
   state.ratingPanelId = null;
   state.pendingActions.clear();
@@ -162,6 +169,15 @@ function signOut() {
   el.access.value = "";
   el.panelHost.replaceChildren();
   showView("login");
+}
+
+function releaseUnusedPatientOffer() {
+  if (!state.token) return;
+  const headers = { Authorization: `Bearer ${state.token}` };
+  if (usesNgrok) headers["ngrok-skip-browser-warning"] = "1";
+  fetch(`${apiBase}/api/assignments/current/release`, {
+    method: "POST", headers, keepalive: true
+  }).catch(() => {});
 }
 
 function patientIsIncomplete() {
@@ -236,6 +252,11 @@ function renderProfiles() {
     button.addEventListener("click", () => openPatient(profile));
     el.profileGrid.appendChild(button);
   }
+  el.nextPatientBox.classList.toggle("hidden", !state.canRequestNext && !state.allPatientsAssigned);
+  el.nextPatientButton.classList.toggle("hidden", !state.canRequestNext);
+  el.nextPatientNote.textContent = state.allPatientsAssigned
+    ? "All patient profiles are currently assigned."
+    : "You can evaluate another patient if you would like to continue.";
 }
 
 async function loadProfiles() {
@@ -243,10 +264,28 @@ async function loadProfiles() {
   try {
     const payload = await api("/api/profiles");
     state.profiles = payload.profiles;
+    state.canRequestNext = Boolean(payload.can_request_next);
+    state.allPatientsAssigned = Boolean(payload.all_patients_assigned);
     renderProfiles();
     showView("profiles");
   } catch (error) {
     handleAuthenticatedError(error);
+  }
+}
+
+async function requestNextPatient() {
+  el.nextPatientButton.disabled = true;
+  try {
+    const payload = await api("/api/assignments/next", { method: "POST" });
+    state.profiles = payload.profiles;
+    state.canRequestNext = Boolean(payload.can_request_next);
+    state.allPatientsAssigned = Boolean(payload.all_patients_assigned);
+    renderProfiles();
+    showToast("Your next patient is ready.");
+  } catch (error) {
+    handleAuthenticatedError(error);
+  } finally {
+    el.nextPatientButton.disabled = false;
   }
 }
 
@@ -809,6 +848,7 @@ el.expertProfileForm.addEventListener("submit", async event => {
 
 el.signOut.addEventListener("click", () => {
   if (!confirmLeavingIncompletePatient()) return;
+  releaseUnusedPatientOffer();
   if (state.view === "session") leaveCurrentSession(signOut);
   else signOut();
 });
@@ -824,6 +864,7 @@ el.home.addEventListener("click", event => {
   else loadProfiles();
 });
 el.beginSession.addEventListener("click", showCurrentStage);
+el.nextPatientButton.addEventListener("click", requestNextPatient);
 el.profileButton.addEventListener("click", openProfileDialog);
 el.ratingProfileButton.addEventListener("click", openProfileDialog);
 el.closeProfile.addEventListener("click", () => el.profileDialog.close());
@@ -835,14 +876,19 @@ el.ratingForm.addEventListener("submit", submitRating);
 
 window.addEventListener("pagehide", () => {
   const panel = currentPanel();
-  if (!state.token || state.view !== "session" || !panel || panel.ended_at) return;
+  if (!state.token) return;
   const headers = { "Content-Type": "application/json", Authorization: `Bearer ${state.token}` };
   if (usesNgrok) headers["ngrok-skip-browser-warning"] = "1";
-  fetch(`${apiBase}/api/studies/${state.study.id}/panels/${panel.id}/leave`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({ client_request_id: requestId() }),
-    keepalive: true
+  if (state.view === "session" && panel && !panel.ended_at) {
+    fetch(`${apiBase}/api/studies/${state.study.id}/panels/${panel.id}/leave`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ client_request_id: requestId() }),
+      keepalive: true
+    }).catch(() => {});
+  }
+  fetch(`${apiBase}/api/assignments/current/release`, {
+    method: "POST", headers, keepalive: true
   }).catch(() => {});
 });
 

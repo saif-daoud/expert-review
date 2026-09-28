@@ -148,6 +148,7 @@ def test_selective_reset_keeps_three_rated_sessions_and_clears_everything_else(
         "panel_messages": 3,
         "inference_jobs": 3,
         "panel_ratings": 3,
+        "patient_assignments": 1,
     }
     assert backup_path.is_file()
 
@@ -173,7 +174,11 @@ def test_selective_reset_keeps_three_rated_sessions_and_clears_everything_else(
     }
     legacy_sessions = connection.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
     legacy_messages = connection.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+    assignment = connection.execute(
+        "SELECT participant_code, profile_id, display_order, status FROM patient_assignments"
+    ).fetchone()
     connection.close()
     assert rating_owners == {"KEEP-EXPERT"}
     assert legacy_sessions == 0
     assert legacy_messages == 0
+    assert tuple(assignment) == ("KEEP-EXPERT", "patient-39", 1, "claimed")

@@ -2,9 +2,10 @@
 
 This package contains the real six-therapist study website and its rootless GPU API.
 
-- The first access code is shared by up to 30 email registrations. Each registered expert receives one unique case from underlying Patients 1–30.
-- The second access code is restricted to one email and receives underlying Patients 31–40.
-- Patient numbers are account-relative: a referred expert sees `Patient 1`, while the second expert sees `Patient 1` through `Patient 10`; underlying dataset indices are never displayed.
+- Every expert uses one shared access code and is identified by their normalized email address.
+- A new expert receives one patient. After completing all six sessions and ratings, they may choose to evaluate another patient.
+- An offered patient is permanently claimed only after the first CTRS rating. An unused offer is released on sign-out/browser close or after its timeout.
+- Patient numbers are account-relative and always begin at `Patient 1`; underlying dataset indices are never displayed.
 - First-time users complete a professional profile; returning users resume under their normalized email address.
 - Each patient starts on a full profile page, followed by six sequential blinded sessions (`Therapist A` through `Therapist F`).
 - After every session, the expert must submit all 11 CTRS scores before the next therapist unlocks.
@@ -70,7 +71,7 @@ Set `STUDY_ARCHER_CHECKPOINT`, `STUDY_ARIA_CHECKPOINT`, `STUDY_SWEET_RL_MODEL`, 
 Create a clean archive locally so the remote `.env`, database, and logs are not overwritten:
 
 ```bash
-tar -czf cbt-live-server.tar.gz --exclude=server/.env --exclude='server/data/*.sqlite3*' --exclude=server/logs --exclude='*/__pycache__' --exclude='*.pyc' -C interface/cbt-live-interaction server
+tar -czf cbt-live-server.tar.gz --exclude=server/.env --exclude='server/data/*.sqlite3*' --exclude=server/logs --exclude=server/server_folder --exclude='*/__pycache__' --exclude='*.pyc' -C interface/cbt-live-interaction server
 scp cbt-live-server.tar.gz YOUR_USER@YOUR_SERVER:~/clean-env/
 ```
 
@@ -90,8 +91,8 @@ chmod 600 .env
 python -c "import secrets; print(secrets.token_urlsafe(48))"
 ```
 
-Edit `.env` and replace `STUDY_EXPERT_1_ACCESS_CODE`, `STUDY_EXPERT_2_ACCESS_CODE`, and `STUDY_TOKEN_SECRET`; use the generated random string for the token
-secret. The first access code is shared by up to 30 referred experts, while the second is reserved for one email with ten patients. The `STUDY_EXPERT_*_CODE` values are internal legacy cohort identifiers and are not entered on the website. Confirm all model-artifact paths, Conda environment names, GPU indices, public website origin, and
+Edit `.env` and replace `STUDY_EXPERT_ACCESS_CODE` and `STUDY_TOKEN_SECRET`; use the generated random string for the token
+secret. The `STUDY_EXPERT_*_CODE` values are retained only for migration of legacy data and are not entered on the website. Confirm all model-artifact paths, Conda environment names, GPU indices, public website origin, and
 optional ngrok static domain. Then validate paths and environments without loading a model:
 
 ```bash

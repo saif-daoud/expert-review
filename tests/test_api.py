@@ -8,16 +8,14 @@ import time
 
 from fastapi.testclient import TestClient
 
-TEST_ACCESS_CODES = {
-    "EXPERT-5834": "shared-referral-access-code",
-    "EXPERT-9271": "second-expert-access-code",
-}
+TEST_ACCESS_CODE = "one-shared-access-code"
+OLD_SECOND_ACCESS_CODE = "retired-second-expert-access-code"
 
 
 def load_client(monkeypatch, tmp_path, max_session_turns=50):
     monkeypatch.setenv("STUDY_DB_PATH", str(tmp_path / "study.sqlite3"))
-    monkeypatch.setenv("STUDY_EXPERT_1_ACCESS_CODE", TEST_ACCESS_CODES["EXPERT-5834"])
-    monkeypatch.setenv("STUDY_EXPERT_2_ACCESS_CODE", TEST_ACCESS_CODES["EXPERT-9271"])
+    monkeypatch.setenv("STUDY_EXPERT_ACCESS_CODE", TEST_ACCESS_CODE)
+    monkeypatch.setenv("STUDY_EXPERT_2_ACCESS_CODE", OLD_SECOND_ACCESS_CODE)
     monkeypatch.setenv("STUDY_TOKEN_SECRET", "test-token-secret-that-is-not-used-in-production")
     monkeypatch.setenv("STUDY_ALLOWED_ORIGINS", "http://127.0.0.1:5500")
     monkeypatch.setenv("STUDY_SERVE_FRONTEND", "false")
@@ -38,7 +36,7 @@ def login(
         "/api/auth/login",
         json={
             "email": email,
-            "access_code": TEST_ACCESS_CODES[participant_code],
+            "access_code": TEST_ACCESS_CODE,
         },
     )
     assert response.status_code == 200
@@ -61,7 +59,7 @@ def login(
         "/api/auth/login",
         json={
             "email": email,
-            "access_code": TEST_ACCESS_CODES[participant_code],
+            "access_code": TEST_ACCESS_CODE,
         },
     )
     assert resumed.status_code == 200
@@ -84,7 +82,7 @@ def test_first_login_collects_professional_profile_and_returning_email_skips_it(
     with load_client(monkeypatch, tmp_path) as client:
         credentials = {
             "email": "Therapist.Expert@example.org",
-            "access_code": TEST_ACCESS_CODES["EXPERT-5834"],
+            "access_code": TEST_ACCESS_CODE,
         }
         first = client.post("/api/auth/login", json=credentials)
         assert first.status_code == 200
@@ -172,6 +170,13 @@ def test_sequential_six_session_ctrs_flow(monkeypatch, tmp_path):
             json={"client_request_id": "start-one"},
         )
         assert started.status_code == 200
+        app_module = sys.modules["server.app"]
+        with app_module.database() as connection:
+            assignment = connection.execute(
+                "SELECT status FROM patient_assignments WHERE profile_id = ?",
+                (profiles[0]["id"],),
+            ).fetchone()
+        assert assignment["status"] == "in_progress"
         panel = wait_for_panel(client, headers, study["id"], panel["id"])
         assert panel["job"]["status"] == "completed"
         assert [message["role"] for message in panel["messages"]] == ["therapist"]
@@ -252,6 +257,14 @@ def test_sequential_six_session_ctrs_flow(monkeypatch, tmp_path):
             assert rated.json()["total_score"] == 33
             study = rated.json()["study"]
             assert study["completed_sessions"] == index + 1
+            if index == 0:
+                with app_module.database() as connection:
+                    assignment = connection.execute(
+                        "SELECT status, claimed_at FROM patient_assignments WHERE profile_id = ?",
+                        (profiles[0]["id"],),
+                    ).fetchone()
+                assert assignment["status"] == "claimed"
+                assert assignment["claimed_at"]
 
         assert study["status"] == "finished"
         assert study["current_panel_id"] is None
@@ -259,8 +272,13 @@ def test_sequential_six_session_ctrs_flow(monkeypatch, tmp_path):
 
         finished = client.post(f"/api/studies/{study['id']}/finish", headers=headers)
         assert finished.status_code == 200
-        profiles = client.get("/api/profiles", headers=headers).json()["profiles"]
-        assert profiles[0]["study"]["completed_sessions"] == 6
+        profile_payload = client.get("/api/profiles", headers=headers).json()
+        assert profile_payload["profiles"][0]["study"]["completed_sessions"] == 6
+        assert profile_payload["can_request_next"] is True
+        next_patient = client.post("/api/assignments/next", headers=headers)
+        assert next_patient.status_code == 200
+        assert [item["display_number"] for item in next_patient.json()["profiles"]] == [1, 2]
+        assert next_patient.json()["can_request_next"] is False
 
 
 def test_patient_farewell_ends_without_another_therapist_response(monkeypatch, tmp_path):
@@ -323,7 +341,7 @@ def test_gpu_capacity_failure_returns_five_minute_retry_message(monkeypatch, tmp
         assert panel["job"]["retry_after_seconds"] == 300
 
 
-def test_leaving_unloads_without_ending_and_next_patient_pauses_previous(monkeypatch, tmp_path):
+def test_leaving_unloads_without_ending_and_preserves_current_patient(monkeypatch, tmp_path):
     with load_client(monkeypatch, tmp_path) as client:
         app_module = sys.modules["server.app"]
         paused_panels = []
@@ -367,19 +385,11 @@ def test_leaving_unloads_without_ending_and_next_patient_pauses_previous(monkeyp
         assert left_panel["status"] == "active"
         assert left_panel["messages"] == original_messages
         assert paused_panels == [first_panel["id"]]
-
-        second_study = client.post(
-            "/api/studies", headers=headers, json={"profile_id": profiles[1]["id"]}
-        ).json()["study"]
-        second_panel = second_study["panels"][0]
-        started = client.post(
-            f"/api/studies/{second_study['id']}/panels/{second_panel['id']}/start",
-            headers=headers,
-            json={"client_request_id": "leave-start-two"},
-        )
-        assert started.status_code == 200
-        assert paused_panels == [first_panel["id"], first_panel["id"]]
-        assert activated_panels[-1] == second_panel["id"]
+        assert activated_panels == [first_panel["id"]]
+        current_profiles = client.get("/api/profiles", headers=headers).json()["profiles"]
+        assert len(current_profiles) == 1
+        assert current_profiles[0]["id"] == profiles[0]["id"]
+        assert current_profiles[0]["study"]["completed_sessions"] == 0
 
 
 def test_therapist_farewell_ends_after_storing_response(monkeypatch, tmp_path):
@@ -448,41 +458,31 @@ def test_studies_are_private_and_mapping_is_stable(monkeypatch, tmp_path):
         first = login(client, "EXPERT-5834", "referral-01@example.org")
         other_shared = login(client, "EXPERT-5834", "referral-02@example.org")
         second = login(client, "EXPERT-9271", "second-expert@example.org")
-        first_profiles = client.get("/api/profiles", headers=first).json()["profiles"]
-        other_shared_profiles = client.get("/api/profiles", headers=other_shared).json()["profiles"]
-        second_profiles = client.get("/api/profiles", headers=second).json()["profiles"]
-        assert len(first_profiles) == len(other_shared_profiles) == 1
-        assert len(second_profiles) == 10
+        first_payload = client.get("/api/profiles", headers=first).json()
+        other_payload = client.get("/api/profiles", headers=other_shared).json()
+        second_payload = client.get("/api/profiles", headers=second).json()
+        first_profiles = first_payload["profiles"]
+        other_shared_profiles = other_payload["profiles"]
+        second_profiles = second_payload["profiles"]
+        assert len(first_profiles) == len(other_shared_profiles) == len(second_profiles) == 1
         assert first_profiles[0]["id"] == "patient-1"
         assert other_shared_profiles[0]["id"] == "patient-2"
-        assert [profile["id"] for profile in second_profiles] == [
-            f"patient-{number}" for number in range(31, 41)
-        ]
+        assert second_profiles[0]["id"] == "patient-3"
         assert [profile["display_number"] for profile in first_profiles] == [1]
         assert [profile["display_name"] for profile in first_profiles] == ["Patient 1"]
-        assert [profile["display_number"] for profile in second_profiles] == list(range(1, 11))
-        assert [profile["display_name"] for profile in second_profiles] == [
-            f"Patient {number}" for number in range(1, 11)
-        ]
-        assert {profile["id"] for profile in first_profiles + other_shared_profiles}.isdisjoint(
-            profile["id"] for profile in second_profiles
-        )
-        crossed_access_code = client.post(
+        assert first_payload["can_request_next"] is False
+        assert other_payload["can_request_next"] is False
+        assert second_payload["can_request_next"] is False
+
+        retired_access_code = client.post(
             "/api/auth/login",
             json={
                 "email": "referral-01@example.org",
-                "access_code": TEST_ACCESS_CODES["EXPERT-9271"],
+                "access_code": OLD_SECOND_ACCESS_CODE,
             },
         )
-        assert crossed_access_code.status_code == 403
+        assert retired_access_code.status_code == 401
         app_module = sys.modules["server.app"]
-        assert app_module.FIRST_SHARED_PROFILE_IDS == tuple(
-            f"patient-{number}" for number in range(1, 31)
-        )
-        assert app_module.SECOND_EXPERT_PROFILE_IDS == tuple(
-            f"patient-{number}" for number in range(31, 41)
-        )
-        assert set(app_module.FIRST_SHARED_PROFILE_IDS).isdisjoint(app_module.SECOND_EXPERT_PROFILE_IDS)
         for group in (1, 2):
             assigned = [
                 profile for profile in app_module.PROFILES.values() if profile["assignment_group"] == group
@@ -520,32 +520,18 @@ def test_studies_are_private_and_mapping_is_stable(monkeypatch, tmp_path):
         )
         assert wrong_profile.status_code == 404
 
-        allocated_ids = {first_profiles[0]["id"], other_shared_profiles[0]["id"]}
-        for number in range(3, 31):
-            referral = login(client, "EXPERT-5834", f"referral-{number:02d}@example.org")
-            profiles = client.get("/api/profiles", headers=referral).json()["profiles"]
-            assert len(profiles) == 1
-            allocated_ids.add(profiles[0]["id"])
-        assert allocated_ids == {f"patient-{number}" for number in range(1, 31)}
+        next_too_early = client.post("/api/assignments/next", headers=first)
+        assert next_too_early.status_code == 409
 
-        exhausted = client.post(
-            "/api/auth/login",
-            json={
-                "email": "referral-31@example.org",
-                "access_code": TEST_ACCESS_CODES["EXPERT-5834"],
-            },
-        )
-        assert exhausted.status_code == 409
-        assert "30 registrations" in exhausted.json()["detail"]
-
-        second_claim = client.post(
-            "/api/auth/login",
-            json={
-                "email": "another-second-expert@example.org",
-                "access_code": TEST_ACCESS_CODES["EXPERT-9271"],
-            },
-        )
-        assert second_claim.status_code == 409
+        # An offered patient is not permanent. Releasing it makes the same
+        # underlying case available to another email, again as Patient 1.
+        released = client.post("/api/assignments/current/release", headers=other_shared)
+        assert released.status_code == 200
+        assert released.json()["released"] is True
+        replacement = login(client, "EXPERT-5834", "replacement@example.org")
+        replacement_profiles = client.get("/api/profiles", headers=replacement).json()["profiles"]
+        assert replacement_profiles[0]["id"] == "patient-2"
+        assert replacement_profiles[0]["display_name"] == "Patient 1"
 
         unknown_login = client.post(
             "/api/auth/login",
@@ -686,7 +672,7 @@ def test_leena_name_match_is_case_insensitive(monkeypatch, tmp_path):
             "/api/auth/login",
             json={
                 "email": "reserved-case@example.org",
-                "access_code": TEST_ACCESS_CODES["EXPERT-5834"],
+                "access_code": TEST_ACCESS_CODE,
             },
         )
         assert first.status_code == 200
