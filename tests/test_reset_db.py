@@ -82,9 +82,16 @@ def test_selective_reset_keeps_three_rated_sessions_and_clears_everything_else(
                     INSERT INTO panel_ratings(
                         id, panel_id, participant_code, scores_json, total_score,
                         comments, submitted_at
-                    ) VALUES (?, ?, 'KEEP-EXPERT', '{}', 33, 'keep', ?)
+                    ) VALUES (?, ?, ?, '{}', 33, 'keep', ?)
                     """,
-                    (f"rating-{index}", panel_id, now),
+                    (
+                        f"rating-{index}",
+                        panel_id,
+                        # Reproduce the live legacy inconsistency that caused
+                        # the participant deletion foreign-key failure.
+                        "REMOVE-EXPERT" if index == 2 else "KEEP-EXPERT",
+                        now,
+                    ),
                 )
     connection.commit()
     connection.close()
@@ -119,3 +126,10 @@ def test_selective_reset_keeps_three_rated_sessions_and_clears_everything_else(
     assert study["id"] == "keep-study"
     assert study["status"] == "active"
     assert all(row["ended_at"] is None and row["termination_reason"] is None for row in unrated)
+
+    connection = sqlite3.connect(database_path)
+    rating_owners = {
+        row[0] for row in connection.execute("SELECT participant_code FROM panel_ratings")
+    }
+    connection.close()
+    assert rating_owners == {"KEEP-EXPERT"}

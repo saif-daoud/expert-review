@@ -111,6 +111,20 @@ def reset_database(
                     keep_study_id,
                 ),
             )
+            # Legacy migrations could leave a preserved rating linked to a
+            # participant other than the current study owner. Normalize only
+            # that ownership field before removing obsolete accounts; the
+            # scores, comments, transcript, and timestamps are untouched.
+            connection.execute(
+                """
+                UPDATE panel_ratings
+                SET participant_code = ?
+                WHERE panel_id IN (
+                    SELECT id FROM study_panels WHERE study_id = ?
+                )
+                """,
+                (owner, keep_study_id),
+            )
             connection.execute(
                 "DELETE FROM participants WHERE participant_code != ?", (owner,)
             )
@@ -127,6 +141,30 @@ def reset_database(
             raise RuntimeError(
                 f"Reset verification failed: {remaining_studies} studies remain. "
                 f"Restore {backup_path}."
+            )
+        remaining_participants = int(
+            connection.execute("SELECT COUNT(*) FROM participants").fetchone()[0]
+        )
+        if remaining_participants != 1:
+            raise RuntimeError(
+                f"Reset verification failed: {remaining_participants} participants remain. "
+                f"Restore {backup_path}."
+            )
+        mismatched_ratings = int(
+            connection.execute(
+                """
+                SELECT COUNT(*)
+                FROM panel_ratings AS r
+                JOIN study_panels AS p ON p.id = r.panel_id
+                WHERE p.study_id = ? AND r.participant_code != ?
+                """,
+                (keep_study_id, owner),
+            ).fetchone()[0]
+        )
+        if mismatched_ratings:
+            raise RuntimeError(
+                f"Reset verification failed: {mismatched_ratings} preserved ratings "
+                f"have a mismatched owner. Restore {backup_path}."
             )
         after = table_counts(connection)
         return before, after
