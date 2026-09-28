@@ -84,27 +84,17 @@ LEGACY_PARTICIPANT_PROFILE_IDS = {
     code: tuple(profile_id for profile_id, profile in PROFILES.items() if profile["assignment_group"] == group)
     for group, code in enumerate(EXPERT_CODES, start=1)
 }
-_SECOND_LEGACY_IDS = LEGACY_PARTICIPANT_PROFILE_IDS[EXPERT_CODES[1]]
-# Preserve the original five second-expert cases, then add two anxiety and
-# three depression profiles so the fixed ten-patient assignment is balanced.
-SECOND_EXPERT_PROFILE_IDS = _SECOND_LEGACY_IDS[:7] + _SECOND_LEGACY_IDS[12:15]
-FIRST_SHARED_PROFILE_IDS = tuple(
-    profile_id for profile_id in PROFILES if profile_id not in set(SECOND_EXPERT_PROFILE_IDS)
+_ORDERED_PROFILE_IDS = tuple(
+    sorted(PROFILES, key=lambda profile_id: int(profile_id.removeprefix("patient-")))
 )
+FIRST_SHARED_PROFILE_IDS = _ORDERED_PROFILE_IDS[:30]
+SECOND_EXPERT_PROFILE_IDS = _ORDERED_PROFILE_IDS[30:]
 if len(FIRST_SHARED_PROFILE_IDS) != 30 or len(set(FIRST_SHARED_PROFILE_IDS)) != 30:
     raise RuntimeError("The first shared code must have 30 unique patient profiles.")
 if len(SECOND_EXPERT_PROFILE_IDS) != 10 or len(set(SECOND_EXPERT_PROFILE_IDS)) != 10:
     raise RuntimeError("The second expert code must have 10 unique patient profiles.")
 if set(FIRST_SHARED_PROFILE_IDS) & set(SECOND_EXPERT_PROFILE_IDS):
     raise RuntimeError("The two registration cohorts must use disjoint patient profiles.")
-for label, profile_ids, expected_per_condition in (
-    ("first shared", FIRST_SHARED_PROFILE_IDS, 15),
-    ("second expert", SECOND_EXPERT_PROFILE_IDS, 5),
-):
-    for condition in ("Anxiety disorder", "Depression"):
-        count = sum(PROFILES[profile_id]["condition"] == condition for profile_id in profile_ids)
-        if count != expected_per_condition:
-            raise RuntimeError(f"The {label} cohort must contain {expected_per_condition} {condition} profiles.")
 
 
 class LoginRequest(BaseModel):

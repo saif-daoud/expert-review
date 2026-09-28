@@ -3,8 +3,8 @@
 Place this directory anywhere writable by your user, such as `~/clean-env/server`. It contains its own model-loading
 code, policies, prompt, and PatientAct profile data; it does not import Python code from `simulations/` or `baselines/`.
 The large trained checkpoint paths are configured in `.env`. FastAPI and all model workers run without root access.
-The first access code supports 30 email-linked registrations with one unique patient each. The second access code is
-restricted to one email with ten patients. No participant code is entered on the website. First-time users complete a professional profile. Sessions run sequentially,
+The first access code supports 30 email-linked registrations with one unique case drawn from underlying Patients 1–30 per email. The second access code is
+restricted to one email with underlying Patients 31–40. Display numbering is account-relative and always begins at Patient 1. No participant code is entered on the website. First-time users complete a professional profile. Sessions run sequentially,
 and the API stores an 11-item CTRS rating before unlocking the next therapist.
 
 ```bash

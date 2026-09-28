@@ -420,9 +420,17 @@ def test_studies_are_private_and_mapping_is_stable(monkeypatch, tmp_path):
         second_profiles = client.get("/api/profiles", headers=second).json()["profiles"]
         assert len(first_profiles) == len(other_shared_profiles) == 1
         assert len(second_profiles) == 10
-        assert first_profiles[0]["id"] != other_shared_profiles[0]["id"]
+        assert first_profiles[0]["id"] == "patient-1"
+        assert other_shared_profiles[0]["id"] == "patient-2"
+        assert [profile["id"] for profile in second_profiles] == [
+            f"patient-{number}" for number in range(31, 41)
+        ]
         assert [profile["display_number"] for profile in first_profiles] == [1]
+        assert [profile["display_name"] for profile in first_profiles] == ["Patient 1"]
         assert [profile["display_number"] for profile in second_profiles] == list(range(1, 11))
+        assert [profile["display_name"] for profile in second_profiles] == [
+            f"Patient {number}" for number in range(1, 11)
+        ]
         assert {profile["id"] for profile in first_profiles + other_shared_profiles}.isdisjoint(
             profile["id"] for profile in second_profiles
         )
@@ -435,15 +443,13 @@ def test_studies_are_private_and_mapping_is_stable(monkeypatch, tmp_path):
         )
         assert crossed_access_code.status_code == 403
         app_module = sys.modules["server.app"]
-        assert len(app_module.FIRST_SHARED_PROFILE_IDS) == 30
-        assert len(app_module.SECOND_EXPERT_PROFILE_IDS) == 10
+        assert app_module.FIRST_SHARED_PROFILE_IDS == tuple(
+            f"patient-{number}" for number in range(1, 31)
+        )
+        assert app_module.SECOND_EXPERT_PROFILE_IDS == tuple(
+            f"patient-{number}" for number in range(31, 41)
+        )
         assert set(app_module.FIRST_SHARED_PROFILE_IDS).isdisjoint(app_module.SECOND_EXPERT_PROFILE_IDS)
-        for profile_ids, expected in (
-            (app_module.FIRST_SHARED_PROFILE_IDS, 15),
-            (app_module.SECOND_EXPERT_PROFILE_IDS, 5),
-        ):
-            assert sum(app_module.PROFILES[profile_id]["condition"] == "Anxiety disorder" for profile_id in profile_ids) == expected
-            assert sum(app_module.PROFILES[profile_id]["condition"] == "Depression" for profile_id in profile_ids) == expected
         for group in (1, 2):
             assigned = [
                 profile for profile in app_module.PROFILES.values() if profile["assignment_group"] == group
@@ -487,7 +493,7 @@ def test_studies_are_private_and_mapping_is_stable(monkeypatch, tmp_path):
             profiles = client.get("/api/profiles", headers=referral).json()["profiles"]
             assert len(profiles) == 1
             allocated_ids.add(profiles[0]["id"])
-        assert len(allocated_ids) == 30
+        assert allocated_ids == {f"patient-{number}" for number in range(1, 31)}
 
         exhausted = client.post(
             "/api/auth/login",
