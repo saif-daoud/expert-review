@@ -4,5 +4,6 @@ __pycache__/
 .pytest_cache/
 server/data/*.sqlite3
 server/data/*.sqlite3-*
+server/server_folder/
 logs/
 *.tar.gz

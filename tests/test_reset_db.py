@@ -21,11 +21,51 @@ def test_selective_reset_keeps_three_rated_sessions_and_clears_everything_else(
     now = "2026-09-28T12:00:00.000Z"
     connection = sqlite3.connect(database_path)
     connection.execute("PRAGMA foreign_keys = ON")
+    connection.executescript(
+        """
+        CREATE TABLE sessions (
+            id TEXT PRIMARY KEY,
+            participant_code TEXT NOT NULL,
+            profile_id TEXT NOT NULL,
+            method_key TEXT NOT NULL,
+            status TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            finished_at TEXT,
+            FOREIGN KEY (participant_code) REFERENCES participants(participant_code)
+        );
+        CREATE TABLE messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            client_message_id TEXT,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (session_id) REFERENCES sessions(id)
+        );
+        """
+    )
     for participant in ("KEEP-EXPERT", "REMOVE-EXPERT"):
         connection.execute(
             "INSERT INTO participants(participant_code, created_at, last_seen_at) VALUES (?, ?, ?)",
             (participant, now, now),
         )
+    connection.execute(
+        """
+        INSERT INTO sessions(
+            id, participant_code, profile_id, method_key, status, created_at, updated_at
+        ) VALUES ('legacy-session', 'REMOVE-EXPERT', 'patient_act_001',
+                  'static-prototype', 'active', ?, ?)
+        """,
+        (now, now),
+    )
+    connection.execute(
+        """
+        INSERT INTO messages(session_id, role, content, client_message_id, created_at)
+        VALUES ('legacy-session', 'therapist', 'obsolete', 'legacy-message', ?)
+        """,
+        (now,),
+    )
     for study_id, participant in (("keep-study", "KEEP-EXPERT"), ("remove-study", "REMOVE-EXPERT")):
         connection.execute(
             """
@@ -131,5 +171,9 @@ def test_selective_reset_keeps_three_rated_sessions_and_clears_everything_else(
     rating_owners = {
         row[0] for row in connection.execute("SELECT participant_code FROM panel_ratings")
     }
+    legacy_sessions = connection.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
+    legacy_messages = connection.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
     connection.close()
     assert rating_owners == {"KEEP-EXPERT"}
+    assert legacy_sessions == 0
+    assert legacy_messages == 0

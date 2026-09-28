@@ -17,6 +17,16 @@ TABLES = (
 )
 
 
+def table_exists(connection: sqlite3.Connection, table: str) -> bool:
+    return (
+        connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+            (table,),
+        ).fetchone()
+        is not None
+    )
+
+
 def table_counts(connection: sqlite3.Connection) -> dict[str, int]:
     return {
         table: int(connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
@@ -125,6 +135,14 @@ def reset_database(
                 """,
                 (owner, keep_study_id),
             )
+            # The first prototype used separate `sessions` and `messages`
+            # tables. They are no longer read by this application, but their
+            # foreign keys can keep obsolete participant rows alive in an
+            # upgraded database. Clear child messages before their sessions.
+            if table_exists(connection, "messages"):
+                connection.execute("DELETE FROM messages")
+            if table_exists(connection, "sessions"):
+                connection.execute("DELETE FROM sessions")
             connection.execute(
                 "DELETE FROM participants WHERE participant_code != ?", (owner,)
             )
@@ -166,6 +184,18 @@ def reset_database(
                 f"Reset verification failed: {mismatched_ratings} preserved ratings "
                 f"have a mismatched owner. Restore {backup_path}."
             )
+        for legacy_table in ("messages", "sessions"):
+            if table_exists(connection, legacy_table):
+                legacy_rows = int(
+                    connection.execute(
+                        f"SELECT COUNT(*) FROM {legacy_table}"
+                    ).fetchone()[0]
+                )
+                if legacy_rows:
+                    raise RuntimeError(
+                        f"Reset verification failed: {legacy_rows} rows remain in "
+                        f"legacy table {legacy_table}. Restore {backup_path}."
+                    )
         after = table_counts(connection)
         return before, after
     finally:

@@ -2,5 +2,6 @@
 __pycache__/
 data/*.sqlite3
 data/*.sqlite3-*
+server_folder/
 logs/
 models/
