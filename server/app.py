@@ -54,6 +54,7 @@ ALLOWED_ORIGINS = [
 SERVE_FRONTEND = os.getenv("STUDY_SERVE_FRONTEND", "false").strip().lower() in {"1", "true", "yes", "on"}
 
 PARTICIPANT_CODE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{1,63}$")
+EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 DATABASE_LOCK = threading.RLock()
 METHOD_KEYS = ["prompting", "proact", "archer", "aria", "sweet_rl", "topas"]
 PANEL_LABELS = ["Therapist A", "Therapist B", "Therapist C", "Therapist D", "Therapist E", "Therapist F"]
@@ -75,15 +76,45 @@ EXPERT_CODES = (
     os.getenv("STUDY_EXPERT_1_CODE", "EXPERT-5834").strip().upper(),
     os.getenv("STUDY_EXPERT_2_CODE", "EXPERT-9271").strip().upper(),
 )
-PARTICIPANT_PROFILE_IDS = {
+LEGACY_PARTICIPANT_PROFILE_IDS = {
     code: tuple(profile_id for profile_id, profile in PROFILES.items() if profile["assignment_group"] == group)
     for group, code in enumerate(EXPERT_CODES, start=1)
 }
+_SECOND_LEGACY_IDS = LEGACY_PARTICIPANT_PROFILE_IDS[EXPERT_CODES[1]]
+# Preserve the original five second-expert cases, then add two anxiety and
+# three depression profiles so the fixed ten-patient assignment is balanced.
+SECOND_EXPERT_PROFILE_IDS = _SECOND_LEGACY_IDS[:7] + _SECOND_LEGACY_IDS[12:15]
+FIRST_SHARED_PROFILE_IDS = tuple(
+    profile_id for profile_id in PROFILES if profile_id not in set(SECOND_EXPERT_PROFILE_IDS)
+)
+if len(FIRST_SHARED_PROFILE_IDS) != 30 or len(set(FIRST_SHARED_PROFILE_IDS)) != 30:
+    raise RuntimeError("The first shared code must have 30 unique patient profiles.")
+if len(SECOND_EXPERT_PROFILE_IDS) != 10 or len(set(SECOND_EXPERT_PROFILE_IDS)) != 10:
+    raise RuntimeError("The second expert code must have 10 unique patient profiles.")
+if set(FIRST_SHARED_PROFILE_IDS) & set(SECOND_EXPERT_PROFILE_IDS):
+    raise RuntimeError("The two registration cohorts must use disjoint patient profiles.")
+for label, profile_ids, expected_per_condition in (
+    ("first shared", FIRST_SHARED_PROFILE_IDS, 15),
+    ("second expert", SECOND_EXPERT_PROFILE_IDS, 5),
+):
+    for condition in ("Anxiety disorder", "Depression"):
+        count = sum(PROFILES[profile_id]["condition"] == condition for profile_id in profile_ids)
+        if count != expected_per_condition:
+            raise RuntimeError(f"The {label} cohort must contain {expected_per_condition} {condition} profiles.")
 
 
 class LoginRequest(BaseModel):
     participant_code: str
+    email: str
     access_code: str
+
+
+class ParticipantProfileRequest(BaseModel):
+    name: str
+    role: str
+    institution: str
+    latest_degree: str
+    years_experience: StrictInt
 
 
 class StudyRequest(BaseModel):
@@ -139,17 +170,36 @@ def decode_token(token: str) -> str:
         participant_code = str(payload["participant_code"])
         if not PARTICIPANT_CODE_PATTERN.fullmatch(participant_code):
             raise ValueError("invalid participant")
-        if participant_code not in PARTICIPANT_PROFILE_IDS:
-            raise ValueError("unknown participant")
         return participant_code
     except (binascii.Error, KeyError, TypeError, UnicodeDecodeError, ValueError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=401, detail="Your session has expired. Please sign in again.") from exc
 
 
-def require_participant(authorization: str | None = Header(default=None)) -> str:
+def require_registered_participant(authorization: str | None = Header(default=None)) -> str:
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Authentication is required.")
-    return decode_token(authorization.removeprefix("Bearer ").strip())
+    participant_code = decode_token(authorization.removeprefix("Bearer ").strip())
+    with database() as connection:
+        participant = connection.execute(
+            "SELECT participant_code FROM participants WHERE participant_code = ?",
+            (participant_code,),
+        ).fetchone()
+    if participant is None:
+        raise HTTPException(status_code=401, detail="Your session has expired. Please sign in again.")
+    return participant_code
+
+
+def require_participant(
+    participant_code: str = Depends(require_registered_participant),
+) -> str:
+    with database() as connection:
+        participant = connection.execute(
+            "SELECT profile_completed FROM participants WHERE participant_code = ?",
+            (participant_code,),
+        ).fetchone()
+    if participant is None or int(participant["profile_completed"] or 0) != 1:
+        raise HTTPException(status_code=403, detail="Complete your professional profile first.")
+    return participant_code
 
 
 @contextmanager
@@ -163,6 +213,68 @@ def database() -> Iterator[sqlite3.Connection]:
         yield connection
     finally:
         connection.close()
+
+
+def normalize_email(value: str) -> str:
+    return value.strip().lower()[:254]
+
+
+def participant_code_for_email(email: str) -> str:
+    return f"P-{hashlib.sha256(email.encode('utf-8')).hexdigest()[:32]}"
+
+
+def registration_profile_ids(cohort_code: str) -> tuple[str, ...]:
+    if cohort_code == EXPERT_CODES[0]:
+        return FIRST_SHARED_PROFILE_IDS
+    if cohort_code == EXPERT_CODES[1]:
+        return SECOND_EXPERT_PROFILE_IDS
+    return ()
+
+
+def assigned_profile_ids(connection: sqlite3.Connection, participant_code: str) -> tuple[str, ...]:
+    participant = connection.execute(
+        "SELECT cohort_code, assigned_profiles_json FROM participants WHERE participant_code = ?",
+        (participant_code,),
+    ).fetchone()
+    if participant is None:
+        return ()
+    try:
+        configured = tuple(json.loads(participant["assigned_profiles_json"] or "[]"))
+    except (TypeError, json.JSONDecodeError):
+        configured = ()
+    valid = tuple(profile_id for profile_id in configured if profile_id in PROFILES)
+    if valid:
+        return valid
+    return LEGACY_PARTICIPANT_PROFILE_IDS.get(str(participant["cohort_code"] or "").upper(), ())
+
+
+def participant_profile_payload(participant: sqlite3.Row) -> dict:
+    return {
+        "email": participant["email"],
+        "name": participant["name"],
+        "role": participant["role"],
+        "institution": participant["institution"],
+        "latest_degree": participant["latest_degree"],
+        "years_experience": participant["years_experience"],
+    }
+
+
+def validate_participant_profile(payload: ParticipantProfileRequest) -> dict:
+    values = {
+        "name": payload.name.strip()[:160],
+        "role": payload.role.strip()[:200],
+        "institution": payload.institution.strip()[:260],
+        "latest_degree": payload.latest_degree.strip()[:160],
+        "years_experience": int(payload.years_experience),
+    }
+    if not all(values[key] for key in ("name", "role", "institution", "latest_degree")):
+        raise HTTPException(status_code=422, detail="Complete every professional profile field.")
+    if values["years_experience"] < 0 or values["years_experience"] > 80:
+        raise HTTPException(
+            status_code=422,
+            detail="Years of clinical experience must be between 0 and 80.",
+        )
+    return values
 
 
 def initialize_database() -> None:
@@ -245,6 +357,40 @@ def initialize_database() -> None:
             );
             """
         )
+        participant_columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(participants)").fetchall()
+        }
+        participant_migrations = {
+            "email": "TEXT",
+            "cohort_code": "TEXT",
+            "assigned_profiles_json": "TEXT",
+            "name": "TEXT",
+            "role": "TEXT",
+            "institution": "TEXT",
+            "latest_degree": "TEXT",
+            "years_experience": "INTEGER",
+            "profile_completed": "INTEGER NOT NULL DEFAULT 0",
+        }
+        for column, declaration in participant_migrations.items():
+            if column not in participant_columns:
+                connection.execute(f"ALTER TABLE participants ADD COLUMN {column} {declaration}")
+        connection.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS participants_email_unique
+            ON participants(lower(email))
+            WHERE email IS NOT NULL AND email != ''
+            """
+        )
+        for legacy_code, profile_ids in LEGACY_PARTICIPANT_PROFILE_IDS.items():
+            connection.execute(
+                """
+                UPDATE participants
+                SET cohort_code = COALESCE(cohort_code, ?),
+                    assigned_profiles_json = COALESCE(assigned_profiles_json, ?)
+                WHERE participant_code = ?
+                """,
+                (legacy_code, json.dumps(profile_ids), legacy_code),
+            )
         panel_columns = {
             row["name"] for row in connection.execute("PRAGMA table_info(study_panels)").fetchall()
         }
@@ -365,6 +511,8 @@ def serialize_job(connection: sqlite3.Connection, job: sqlite3.Row | None) -> di
 
 def serialize_study(connection: sqlite3.Connection, study: sqlite3.Row) -> dict:
     profile = PROFILES[study["profile_id"]]
+    allowed_ids = assigned_profile_ids(connection, study["participant_code"])
+    display_number = allowed_ids.index(study["profile_id"]) + 1 if study["profile_id"] in allowed_ids else profile["display_number"]
     current = _current_panel(connection, study["id"])
     current_panel_id = current["id"] if current is not None and study["status"] == "active" else None
     completed_sessions = int(
@@ -455,7 +603,7 @@ def serialize_study(connection: sqlite3.Connection, study: sqlite3.Row) -> dict:
     return {
         "id": study["id"],
         "status": study["status"],
-        "profile": public_profile(profile),
+        "profile": public_profile(profile, display_number=display_number),
         "panels": panels,
         "current_panel_id": current_panel_id,
         "completed_sessions": completed_sessions,
@@ -569,29 +717,152 @@ def health() -> dict:
 
 @app.post("/api/auth/login")
 def login(payload: LoginRequest) -> dict:
-    participant_code = payload.participant_code.strip().upper()
-    if not PARTICIPANT_CODE_PATTERN.fullmatch(participant_code):
+    cohort_code = payload.participant_code.strip().upper()
+    email = normalize_email(payload.email)
+    if not PARTICIPANT_CODE_PATTERN.fullmatch(cohort_code):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Participant code must contain 2-64 letters, numbers, dots, underscores, or hyphens.",
         )
-    if participant_code not in PARTICIPANT_PROFILE_IDS:
+    if cohort_code not in EXPERT_CODES:
         raise HTTPException(status_code=401, detail="The participant code is incorrect.")
+    if not EMAIL_PATTERN.fullmatch(email):
+        raise HTTPException(status_code=422, detail="Enter a valid email address.")
     if not hmac.compare_digest(payload.access_code, ACCESS_CODE):
         raise HTTPException(status_code=401, detail="The access code is incorrect.")
     now = utc_now()
     with DATABASE_LOCK, database() as connection:
         connection.execute("BEGIN IMMEDIATE")
+        participant = connection.execute(
+            "SELECT * FROM participants WHERE lower(email) = ?",
+            (email,),
+        ).fetchone()
+        if participant is not None and participant["cohort_code"] != cohort_code:
+            connection.rollback()
+            raise HTTPException(
+                status_code=403,
+                detail="This email is registered with a different participant code.",
+            )
+        if participant is None:
+            pool = registration_profile_ids(cohort_code)
+            if cohort_code == EXPERT_CODES[0]:
+                used: set[str] = set()
+                for row in connection.execute(
+                    """
+                    SELECT assigned_profiles_json FROM participants
+                    WHERE cohort_code = ? AND email IS NOT NULL AND email != ''
+                    """,
+                    (cohort_code,),
+                ).fetchall():
+                    try:
+                        used.update(json.loads(row["assigned_profiles_json"] or "[]"))
+                    except (TypeError, json.JSONDecodeError):
+                        continue
+                available = next((profile_id for profile_id in pool if profile_id not in used), None)
+                if available is None:
+                    connection.rollback()
+                    raise HTTPException(
+                        status_code=409,
+                        detail="All 30 registrations for this participant code have already been claimed.",
+                    )
+                profile_ids = (available,)
+            else:
+                registered = connection.execute(
+                    """
+                    SELECT participant_code FROM participants
+                    WHERE cohort_code = ? AND email IS NOT NULL AND email != '' LIMIT 1
+                    """,
+                    (cohort_code,),
+                ).fetchone()
+                if registered is not None:
+                    connection.rollback()
+                    raise HTTPException(
+                        status_code=409,
+                        detail="This participant code is already registered to an email address.",
+                    )
+                profile_ids = pool
+            participant_code = participant_code_for_email(email)
+            connection.execute(
+                """
+                INSERT INTO participants(
+                    participant_code, email, cohort_code, assigned_profiles_json,
+                    profile_completed, created_at, last_seen_at
+                ) VALUES (?, ?, ?, ?, 0, ?, ?)
+                """,
+                (participant_code, email, cohort_code, json.dumps(profile_ids), now, now),
+            )
+            participant = connection.execute(
+                "SELECT * FROM participants WHERE participant_code = ?",
+                (participant_code,),
+            ).fetchone()
+        else:
+            connection.execute(
+                "UPDATE participants SET last_seen_at = ? WHERE participant_code = ?",
+                (now, participant["participant_code"]),
+            )
+            participant = connection.execute(
+                "SELECT * FROM participants WHERE participant_code = ?",
+                (participant["participant_code"],),
+            ).fetchone()
+        connection.commit()
+    profile_completed = int(participant["profile_completed"] or 0) == 1
+    return {
+        "token": create_token(participant["participant_code"]),
+        "participant_code": cohort_code,
+        "email": email,
+        "profile_required": not profile_completed,
+        "profile": participant_profile_payload(participant) if profile_completed else None,
+        "expires_in": TOKEN_TTL_SECONDS,
+    }
+
+
+@app.get("/api/auth/me")
+def auth_me(participant_code: str = Depends(require_registered_participant)) -> dict:
+    with database() as connection:
+        participant = connection.execute(
+            "SELECT * FROM participants WHERE participant_code = ?",
+            (participant_code,),
+        ).fetchone()
+    profile_completed = int(participant["profile_completed"] or 0) == 1
+    return {
+        "participant_code": participant["cohort_code"],
+        "email": participant["email"],
+        "profile_required": not profile_completed,
+        "profile": participant_profile_payload(participant) if profile_completed else None,
+    }
+
+
+@app.post("/api/auth/profile")
+def save_participant_profile(
+    payload: ParticipantProfileRequest,
+    participant_code: str = Depends(require_registered_participant),
+) -> dict:
+    values = validate_participant_profile(payload)
+    with DATABASE_LOCK, database() as connection:
+        connection.execute("BEGIN IMMEDIATE")
         connection.execute(
             """
-            INSERT INTO participants(participant_code, created_at, last_seen_at)
-            VALUES (?, ?, ?)
-            ON CONFLICT(participant_code) DO UPDATE SET last_seen_at = excluded.last_seen_at
+            UPDATE participants
+            SET name = ?, role = ?, institution = ?, latest_degree = ?,
+                years_experience = ?, profile_completed = 1, last_seen_at = ?
+            WHERE participant_code = ?
             """,
-            (participant_code, now, now),
+            (
+                values["name"],
+                values["role"],
+                values["institution"],
+                values["latest_degree"],
+                values["years_experience"],
+                utc_now(),
+                participant_code,
+            ),
         )
+        participant = connection.execute(
+            "SELECT * FROM participants WHERE participant_code = ?",
+            (participant_code,),
+        ).fetchone()
         connection.commit()
-    return {"token": create_token(participant_code), "participant_code": participant_code, "expires_in": TOKEN_TTL_SECONDS}
+    return {"profile": participant_profile_payload(participant)}
 
 
 @app.get("/api/profiles")
@@ -616,20 +887,25 @@ def list_profiles(participant_code: str = Depends(require_participant)) -> dict:
                 (participant_code,),
             ).fetchall()
         }
-    allowed_ids = PARTICIPANT_PROFILE_IDS[participant_code]
+        allowed_ids = assigned_profile_ids(connection, participant_code)
     return {
-        "profiles": [profile_card(PROFILES[profile_id], existing.get(profile_id)) for profile_id in allowed_ids]
+        "profiles": [
+            profile_card(PROFILES[profile_id], existing.get(profile_id), display_number=index)
+            for index, profile_id in enumerate(allowed_ids, start=1)
+        ]
     }
 
 
 @app.post("/api/studies")
 def create_study(payload: StudyRequest, participant_code: str = Depends(require_participant)) -> dict:
     profile_id = payload.profile_id.strip()
-    if profile_id not in PARTICIPANT_PROFILE_IDS[participant_code]:
-        raise HTTPException(status_code=404, detail="Patient profile not found.")
     now = utc_now()
     with DATABASE_LOCK, database() as connection:
         connection.execute("BEGIN IMMEDIATE")
+        allowed_ids = assigned_profile_ids(connection, participant_code)
+        if profile_id not in allowed_ids:
+            connection.rollback()
+            raise HTTPException(status_code=404, detail="Patient profile not found.")
         existing = connection.execute(
             "SELECT * FROM studies WHERE participant_code = ? AND profile_id = ?",
             (participant_code, profile_id),

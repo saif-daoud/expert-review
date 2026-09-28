@@ -5,10 +5,16 @@ const usesNgrok = hasRemoteApi && /(^|\.)ngrok(-free)?\.(app|dev)$/i.test(new UR
 const ctrsScale = window.CTRS_SCALE || [];
 const ctrsRubric = window.CTRS_RUBRIC || [];
 
-const storageKeys = { token: "cbt-live/token", participant: "cbt-live/participant" };
+const storageKeys = {
+  token: "cbt-live/token",
+  participant: "cbt-live/participant",
+  email: "cbt-live/email"
+};
+const incompletePatientWarning = "Your input for this patient is incomplete. Please finish the remaining therapist baseline(s) and submit their ratings before leaving.";
 const state = {
   token: sessionStorage.getItem(storageKeys.token) || "",
   participant: sessionStorage.getItem(storageKeys.participant) || "",
+  email: sessionStorage.getItem(storageKeys.email) || "",
   profiles: [],
   study: null,
   view: "login",
@@ -21,6 +27,7 @@ const state = {
 const el = {
   views: {
     login: document.getElementById("login-view"),
+    expertProfile: document.getElementById("expert-profile-view"),
     profiles: document.getElementById("profiles-view"),
     patient: document.getElementById("patient-view"),
     session: document.getElementById("session-view"),
@@ -29,9 +36,18 @@ const el = {
   connection: document.getElementById("connection-status"),
   loginForm: document.getElementById("login-form"),
   participant: document.getElementById("participant-code"),
+  email: document.getElementById("email-address"),
   access: document.getElementById("access-code"),
   loginButton: document.getElementById("login-button"),
   loginError: document.getElementById("login-error"),
+  expertProfileForm: document.getElementById("expert-profile-form"),
+  expertName: document.getElementById("expert-name"),
+  expertRole: document.getElementById("expert-role"),
+  expertInstitution: document.getElementById("expert-institution"),
+  expertDegree: document.getElementById("expert-degree"),
+  expertExperience: document.getElementById("expert-experience"),
+  expertProfileButton: document.getElementById("expert-profile-button"),
+  expertProfileError: document.getElementById("expert-profile-error"),
   signOut: document.getElementById("sign-out-button"),
   home: document.getElementById("home-link"),
   profileGrid: document.getElementById("profile-grid"),
@@ -140,15 +156,29 @@ function signOut() {
   clearPoll();
   state.token = "";
   state.participant = "";
+  state.email = "";
   state.profiles = [];
   state.study = null;
   state.ratingPanelId = null;
   state.pendingActions.clear();
   sessionStorage.removeItem(storageKeys.token);
   sessionStorage.removeItem(storageKeys.participant);
+  sessionStorage.removeItem(storageKeys.email);
   el.access.value = "";
   el.panelHost.replaceChildren();
   showView("login");
+}
+
+function patientIsIncomplete() {
+  return Boolean(
+    state.study
+    && state.study.status !== "finished"
+    && Number(state.study.completed_sessions || 0) < Number(state.study.total_sessions || 6)
+  );
+}
+
+function confirmLeavingIncompletePatient() {
+  return !patientIsIncomplete() || window.confirm(incompletePatientWarning);
 }
 
 function handleAuthenticatedError(error) {
@@ -226,6 +256,7 @@ async function loadProfiles() {
 }
 
 async function openPatient(profile) {
+  if (patientIsIncomplete() && state.study.profile?.id !== profile.id && !confirmLeavingIncompletePatient()) return;
   try {
     const payload = await api("/api/studies", {
       method: "POST",
@@ -237,6 +268,16 @@ async function openPatient(profile) {
   } catch (error) {
     handleAuthenticatedError(error);
   }
+}
+
+function showExpertProfile(profile = null) {
+  el.expertProfileError.classList.add("hidden");
+  el.expertName.value = profile?.name || "";
+  el.expertRole.value = profile?.role || "";
+  el.expertInstitution.value = profile?.institution || "";
+  el.expertDegree.value = profile?.latest_degree || "";
+  el.expertExperience.value = profile?.years_experience ?? "";
+  showView("expertProfile");
 }
 
 function populatePatientProfile() {
@@ -695,13 +736,20 @@ el.loginForm.addEventListener("submit", async event => {
     const payload = await api("/api/auth/login", {
       method: "POST",
       skipAuth: true,
-      body: JSON.stringify({ participant_code: el.participant.value.trim(), access_code: el.access.value })
+      body: JSON.stringify({
+        participant_code: el.participant.value.trim(),
+        email: el.email.value.trim(),
+        access_code: el.access.value
+      })
     });
     state.token = payload.token;
     state.participant = payload.participant_code;
+    state.email = payload.email;
     sessionStorage.setItem(storageKeys.token, state.token);
     sessionStorage.setItem(storageKeys.participant, state.participant);
-    await loadProfiles();
+    sessionStorage.setItem(storageKeys.email, state.email);
+    if (payload.profile_required) showExpertProfile(payload.profile);
+    else await loadProfiles();
   } catch (error) {
     el.loginError.textContent = error.message;
     el.loginError.classList.remove("hidden");
@@ -710,15 +758,43 @@ el.loginForm.addEventListener("submit", async event => {
   }
 });
 
+el.expertProfileForm.addEventListener("submit", async event => {
+  event.preventDefault();
+  el.expertProfileError.classList.add("hidden");
+  el.expertProfileButton.disabled = true;
+  try {
+    await api("/api/auth/profile", {
+      method: "POST",
+      body: JSON.stringify({
+        name: el.expertName.value.trim(),
+        role: el.expertRole.value.trim(),
+        institution: el.expertInstitution.value.trim(),
+        latest_degree: el.expertDegree.value.trim(),
+        years_experience: Number(el.expertExperience.value)
+      })
+    });
+    await loadProfiles();
+  } catch (error) {
+    el.expertProfileError.textContent = error.message;
+    el.expertProfileError.classList.remove("hidden");
+  } finally {
+    el.expertProfileButton.disabled = false;
+  }
+});
+
 el.signOut.addEventListener("click", () => {
+  if (!confirmLeavingIncompletePatient()) return;
   if (state.view === "session") leaveCurrentSession(signOut);
   else signOut();
 });
-el.patientBack.addEventListener("click", loadProfiles);
+el.patientBack.addEventListener("click", () => {
+  if (confirmLeavingIncompletePatient()) loadProfiles();
+});
 el.sessionBack.addEventListener("click", () => leaveCurrentSession(showPatientProfile));
 el.home.addEventListener("click", event => {
   event.preventDefault();
   if (!state.token) return;
+  if (!confirmLeavingIncompletePatient()) return;
   if (state.view === "session") leaveCurrentSession(loadProfiles);
   else loadProfiles();
 });
@@ -745,12 +821,30 @@ window.addEventListener("pagehide", () => {
   }).catch(() => {});
 });
 
+window.addEventListener("beforeunload", event => {
+  if (!patientIsIncomplete()) return;
+  event.preventDefault();
+  event.returnValue = incompletePatientWarning;
+});
+
 async function boot() {
   buildRatingItems();
   checkHealth();
   if (state.token) {
     el.participant.value = state.participant;
-    await loadProfiles();
+    el.email.value = state.email;
+    try {
+      const account = await api("/api/auth/me");
+      state.participant = account.participant_code || state.participant;
+      state.email = account.email || state.email;
+      sessionStorage.setItem(storageKeys.participant, state.participant);
+      sessionStorage.setItem(storageKeys.email, state.email);
+      if (account.profile_required) showExpertProfile(account.profile);
+      else await loadProfiles();
+    } catch (error) {
+      if (error.status === 404) await loadProfiles();
+      else handleAuthenticatedError(error);
+    }
   } else {
     showView("login");
   }

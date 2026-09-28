@@ -3,8 +3,9 @@
 Place this directory anywhere writable by your user, such as `~/clean-env/server`. It contains its own model-loading
 code, policies, prompt, and PatientAct profile data; it does not import Python code from `simulations/` or `baselines/`.
 The large trained checkpoint paths are configured in `.env`. FastAPI and all model workers run without root access.
-Each configured expert receives 20 distinct profiles. Sessions run sequentially, and the API stores an 11-item CTRS
-rating before unlocking the next therapist.
+The first participant code supports 30 email-linked registrations with one unique patient each. The second code is
+restricted to one email with ten patients. First-time users complete a professional profile. Sessions run sequentially,
+and the API stores an 11-item CTRS rating before unlocking the next therapist.
 
 ```bash
 cd ~/clean-env/server
@@ -32,7 +33,7 @@ nohup bash run_ngrok.sh > logs/ngrok.log 2>&1 & echo $! > logs/ngrok.pid
 
 The API must run with one Uvicorn worker because it owns the single FIFO generation lane. Worker placement defaults
 to base + Archer on GPU 0 and ARIA + Sweet-RL on GPU 3. Override `STUDY_GPU_*` in `.env` if the allocation changes.
-TOPAS is a static server-side stub until its implementation is ready.
+TOPAS uses the bundled standalone implementation and the artifact paths configured in `.env`.
 
 Useful checks:
 

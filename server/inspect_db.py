@@ -10,6 +10,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Inspect the live-interaction SQLite database.")
     parser.add_argument("--study", help="Show one study and its panels.")
     parser.add_argument("--participant", help="Filter the study list by participant code.")
+    parser.add_argument("--email", help="Filter the study list by a registered expert email.")
     parser.add_argument("--messages", action="store_true", help="Include transcript messages with --study.")
     parser.add_argument("--show-methods", action="store_true", help="Reveal the blinded server-side method mapping.")
     args = parser.parse_args()
@@ -22,6 +23,16 @@ def main() -> int:
     connection = sqlite3.connect(database_path)
     connection.row_factory = sqlite3.Row
     print(f"Database: {database_path.resolve()}")
+
+    participant_filter = args.participant
+    if args.email:
+        account = connection.execute(
+            "SELECT participant_code FROM participants WHERE lower(email) = lower(?)",
+            (args.email.strip(),),
+        ).fetchone()
+        if account is None:
+            raise SystemExit(f"Registered email not found: {args.email}")
+        participant_filter = account["participant_code"]
 
     totals = {
         table: connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
@@ -90,9 +101,9 @@ def main() -> int:
         LEFT JOIN panel_ratings AS r ON r.panel_id = p.id
     """
     parameters: tuple[str, ...] = ()
-    if args.participant:
+    if participant_filter:
         query += " WHERE s.participant_code = ?"
-        parameters = (args.participant,)
+        parameters = (participant_filter,)
     query += " GROUP BY s.id ORDER BY s.created_at DESC"
     rows = connection.execute(query, parameters).fetchall()
     print("\nStudies")

@@ -25,12 +25,30 @@
         <div class="login-card">
           <p class="eyebrow">Study access</p>
           <h1>Welcome</h1>
-          <p class="intro">Enter the codes provided by the research team.</p>
+          <p class="intro">Enter your email and the codes provided by the research team.</p>
           <form id="login-form">
             <label>Participant code<input id="participant-code" autocomplete="username" maxlength="64" required /></label>
+            <label>Email address<input id="email-address" type="email" autocomplete="email" maxlength="254" required /></label>
             <label>Access code<input id="access-code" type="password" autocomplete="current-password" required /></label>
             <p class="error hidden" id="login-error" role="alert"></p>
             <button class="primary-button" id="login-button" type="submit">Continue</button>
+          </form>
+        </div>
+      </section>
+
+      <section class="view login-view hidden" id="expert-profile-view">
+        <div class="login-card expert-profile-card">
+          <p class="eyebrow">Expert profile</p>
+          <h1>About you</h1>
+          <p class="intro">You will role-play each assigned patient, interact with every therapist baseline, and score each completed session using the 11-item CTRS.</p>
+          <form id="expert-profile-form">
+            <label>Full name<input id="expert-name" autocomplete="name" maxlength="160" required /></label>
+            <label>Role or specialty<input id="expert-role" autocomplete="organization-title" maxlength="200" required /></label>
+            <label>Institution<input id="expert-institution" autocomplete="organization" maxlength="260" required /></label>
+            <label>Latest degree<input id="expert-degree" maxlength="160" required /></label>
+            <label>Years of clinical experience<input id="expert-experience" type="number" min="0" max="80" step="1" required /></label>
+            <p class="error hidden" id="expert-profile-error" role="alert"></p>
+            <button class="primary-button" id="expert-profile-button" type="submit">Save and continue</button>
           </form>
         </div>
       </section>
@@ -41,7 +59,7 @@
         </div>
         <div class="task-card">
           <span class="task-number">Your task</span>
-          <p>Role-play the patient using the profile provided. You will speak with one therapist at a time, then score that session on all 11 CTRS items.</p>
+          <p>Role-play the patient using the profile provided. Complete all six therapist baselines for one patient and submit every CTRS rating before leaving that patient.</p>
         </div>
         <div class="profile-grid" id="profile-grid"></div>
       </section>

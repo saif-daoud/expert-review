@@ -233,11 +233,16 @@ def load_profiles() -> dict[str, dict[str, Any]]:
     return selected
 
 
-def profile_card(profile: dict[str, Any], study: dict[str, Any] | None = None) -> dict[str, Any]:
+def profile_card(
+    profile: dict[str, Any],
+    study: dict[str, Any] | None = None,
+    display_number: int | None = None,
+) -> dict[str, Any]:
+    number = int(display_number or profile["display_number"])
     result = {
         "id": profile["id"],
-        "display_number": profile["display_number"],
-        "display_name": profile["display_name"],
+        "display_number": number,
+        "display_name": f"Patient {number}",
         "condition": profile["condition"],
         "short_description": profile["short_description"],
     }
@@ -246,6 +251,10 @@ def profile_card(profile: dict[str, Any], study: dict[str, Any] | None = None) -
     return result
 
 
-def public_profile(profile: dict[str, Any]) -> dict[str, Any]:
+def public_profile(profile: dict[str, Any], display_number: int | None = None) -> dict[str, Any]:
     private_keys = {"source_id", "assignment_group"}
-    return {key: value for key, value in profile.items() if key not in private_keys}
+    result = {key: value for key, value in profile.items() if key not in private_keys}
+    if display_number is not None:
+        result["display_number"] = int(display_number)
+        result["display_name"] = f"Patient {int(display_number)}"
+    return result

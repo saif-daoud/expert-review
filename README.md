@@ -2,9 +2,12 @@
 
 This package contains the real six-therapist study website and its rootless GPU API.
 
-- Each expert receives 20 distinct PatientAct role cards (10 anxiety and 10 depression profiles).
+- The first participant code is shared by up to 30 email registrations. Each registered expert receives one unique patient (15 anxiety and 15 depression profiles across the cohort).
+- The second participant code is restricted to one email and receives 10 patients (5 anxiety and 5 depression profiles).
+- First-time users complete a professional profile; returning users resume under their normalized email address.
 - Each patient starts on a full profile page, followed by six sequential blinded sessions (`Therapist A` through `Therapist F`).
 - After every session, the expert must submit all 11 CTRS scores before the next therapist unlocks.
+- Leaving an incomplete patient displays a reminder to finish all six baselines and ratings; all partial work remains saved.
 - A session ends manually, after 50 therapist-patient turns, or when either speaker gives a simulation-style farewell.
 - All six methods use bundled inference code matching the simulation policies, including real TOPAS inference.
 - A single FIFO queue serializes inference across all experts and panels.
@@ -85,7 +88,8 @@ python -c "import secrets; print(secrets.token_urlsafe(48))"
 ```
 
 Edit `.env` and replace `STUDY_ACCESS_CODE` and `STUDY_TOKEN_SECRET`; use the generated random string for the token
-secret. Confirm all model-artifact paths, Conda environment names, GPU indices, public website origin, and
+secret. `STUDY_EXPERT_1_CODE` is the shared referral code (up to 30 emails), while
+`STUDY_EXPERT_2_CODE` is reserved for one email with ten patients. Confirm all model-artifact paths, Conda environment names, GPU indices, public website origin, and
 optional ngrok static domain. Then validate paths and environments without loading a model:
 
 ```bash
@@ -148,6 +152,7 @@ cd ~/clean-env/server
 set -a; source .env; set +a
 python inspect_db.py
 python inspect_db.py --participant EXPERT-5834
+python inspect_db.py --email expert@example.org
 python inspect_db.py --study STUDY_UUID --messages
 python inspect_db.py --study STUDY_UUID --show-methods
 ```
