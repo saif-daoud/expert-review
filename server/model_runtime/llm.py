@@ -688,16 +688,20 @@ Assistant:" prompt.
         max_new = self._resolve_max_new_tokens()
         if max_new is None:
             max_new = FALLBACK_MAX_NEW_TOKENS
-        with torch.no_grad():
-            out = self.model.generate(
-                **inputs,
-                max_new_tokens=int(max_new),
-                do_sample=True,
+        generation_kwargs: Dict[str, Any] = {
+            "max_new_tokens": int(max_new),
+            "do_sample": self.temperature > 0,
+            "pad_token_id": self.tokenizer.pad_token_id,
+            "eos_token_id": self.tokenizer.eos_token_id,
+        }
+        if self.temperature > 0:
+            generation_kwargs.update(
                 temperature=self.temperature,
                 top_p=self.top_p,
-                pad_token_id=self.tokenizer.pad_token_id,
-                eos_token_id=self.tokenizer.eos_token_id,
             )
+
+        with torch.no_grad():
+            out = self.model.generate(**inputs, **generation_kwargs)
         t1 = time.perf_counter()
 
         gen_ids = out[0][prompt_len:]

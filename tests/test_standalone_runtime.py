@@ -8,7 +8,7 @@ import pytest
 from server.model_runtime.policies import CBT_DOMAIN as STANDALONE_DOMAIN
 from server.model_runtime.policies import _clean
 from server.model_runtime.policies import build_policy as build_standalone_policy
-from server.model_runtime.llm import TransformersChatGenerator
+from server.model_runtime.llm import TextGenerator, TransformersChatGenerator
 
 
 class RecordingGenerator:
@@ -41,6 +41,39 @@ class CharacterTokenizer:
         return "".join(chr(token_id) for token_id in token_ids)
 
 
+class GenerationTokenizer:
+    pad_token_id = 0
+    eos_token_id = 1
+    truncation_side = "left"
+
+    def apply_chat_template(self, _messages, **_kwargs):
+        return "rendered prompt"
+
+    def __call__(self, _text, return_tensors=None, **_kwargs):
+        if return_tensors == "pt":
+            import torch
+
+            return {"input_ids": torch.tensor([[10, 11]])}
+        return {"input_ids": [10, 11]}
+
+    def decode(self, _token_ids, **_kwargs):
+        return "deterministic answer"
+
+    def encode(self, text):
+        return list(range(len(text)))
+
+
+class RecordingModel:
+    def __init__(self):
+        self.kwargs = {}
+
+    def generate(self, **kwargs):
+        import torch
+
+        self.kwargs = kwargs
+        return torch.cat((kwargs["input_ids"], torch.tensor([[42]])), dim=1)
+
+
 def test_context_limit_truncates_only_conversation_history():
     generator = object.__new__(TransformersChatGenerator)
     generator.prompt_style = "chat"
@@ -66,6 +99,27 @@ def test_context_limit_truncates_only_conversation_history():
     assert suffix.strip() in rendered
     assert "historical turn 19" in rendered
     assert "historical turn 0" not in rendered
+
+
+def test_zero_temperature_uses_greedy_decoding_for_theramind_classifiers():
+    generator = object.__new__(TransformersChatGenerator)
+    TextGenerator.__init__(generator, max_new_tokens=4)
+    generator.model_name_or_path = "test-model"
+    generator.device = "cpu"
+    generator.device_map = None
+    generator.max_input_length = 512
+    generator.prompt_style = "chat"
+    generator.temperature = 0.0
+    generator.top_p = 0.75
+    generator.tokenizer = GenerationTokenizer()
+    generator.model = RecordingModel()
+
+    response = generator.generate(system="classify", user="Return True or False")
+
+    assert response == "deterministic answer"
+    assert generator.model.kwargs["do_sample"] is False
+    assert "temperature" not in generator.model.kwargs
+    assert "top_p" not in generator.model.kwargs
 
 
 @pytest.mark.parametrize(
