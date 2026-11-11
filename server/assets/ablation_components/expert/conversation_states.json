@@ -1,0 +1,645 @@
+[
+  {
+    "Variable Name": "Case Formulation Completeness and Coherence",
+    "Description": "Overall quality of the evolving CBT explanatory model linking triggers, automatic thoughts, emotions, behaviors, physiological responses, intermediate assumptions, core beliefs, and maintaining factors.",
+    "Categorical values": [
+      "Not Started",
+      "Fragmented",
+      "Partially Developed",
+      "Coherent",
+      "Comprehensive and Shared",
+      "Revision Needed"
+    ],
+    "Numerical values": "regression from 0 to 1 scale",
+    "Numerical dimension": "Completeness, coherence, and collaborative agreement of the current formulation",
+    "Range Explanation": {
+      "dimension": "Completeness, coherence, and collaborative agreement of the current formulation",
+      "direction": "Higher values indicate a more complete, coherent, collaborative, and clinically useful formulation.",
+      "anchors": {
+        "0.00": "No explicit formulation is available.",
+        "0.25": "Isolated information is recorded, but important links are absent or speculative.",
+        "0.50": "Several components and links are identified, but the model remains incomplete or only partly shared.",
+        "0.75": "Most relevant components are linked in a coherent model and broadly agreed with the patient.",
+        "1.00": "The formulation is comprehensive, evidence-linked, collaboratively understood, clinically useful, and current."
+      },
+      "missing_value_policy": "Use null when the dimension is not assessed or evidence is insufficient; do not encode missing information as 0."
+    }
+  },
+  {
+    "Variable Name": "Triggering Situations",
+    "Description": "Specific internal or external situations that precede or activate clinically relevant thoughts, emotions, behaviors, or physiological responses.",
+    "Categorical values": [
+      "Not Elicited",
+      "Vague Context",
+      "Specific Situation",
+      "Recurring Trigger",
+      "Multiple Linked Triggers"
+    ],
+    "Numerical values": "regression from 0 to 1 scale",
+    "Numerical dimension": "Clarity and contextual specificity with which triggering situations are identified",
+    "Range Explanation": {
+      "dimension": "Clarity and contextual specificity with which triggering situations are identified",
+      "direction": "Higher values indicate clearer and more formulation-ready identification of triggers.",
+      "anchors": {
+        "0.00": "No triggering situation has been identified.",
+        "0.25": "A broad context is mentioned, but timing, cues, or circumstances are unclear.",
+        "0.50": "At least one relevant situation is identified with moderate specificity.",
+        "0.75": "Triggers are specific, recurrent patterns are recognized, and temporal links are mostly clear.",
+        "1.00": "Triggers are precisely characterized across contexts and clearly linked to downstream formulation components."
+      },
+      "missing_value_policy": "Use null when the dimension is not assessed or evidence is insufficient; do not encode missing information as 0."
+    }
+  },
+  {
+    "Variable Name": "Automatic Thoughts",
+    "Description": "Spontaneous verbal thoughts, images, or meanings that occur in triggering situations and influence emotional and behavioral responses.",
+    "Categorical values": [
+      "Not Elicited",
+      "Negative",
+      "Catastrophic",
+      "Self-Critical",
+      "Threat-Related",
+      "Balanced/Adaptive",
+      "Recurrent"
+    ],
+    "Numerical values": "regression from 0 to 1 scale",
+    "Numerical dimension": "Clarity and formulation linkage of identified automatic thoughts",
+    "Range Explanation": {
+      "dimension": "Clarity and formulation linkage of identified automatic thoughts",
+      "direction": "Higher values indicate better identification and linkage, not greater negativity.",
+      "anchors": {
+        "0.00": "No automatic thought or image has been elicited.",
+        "0.25": "A possible thought is inferred or described vaguely without the patient's exact meaning.",
+        "0.50": "A relevant thought is identified and linked to either emotion or behavior.",
+        "0.75": "The thought is specific, rated, and linked to trigger, emotion, and behavior.",
+        "1.00": "Key automatic thoughts are clearly elicited in the patient's own words, rated, recurrent patterns are recognized, and links are well supported."
+      },
+      "missing_value_policy": "Use null when the dimension is not assessed or evidence is insufficient; do not encode missing information as 0."
+    }
+  },
+  {
+    "Variable Name": "Emotions",
+    "Description": "The patient's emotional responses within the formulation, including type, context, and relation to thoughts, behavior, and physiology.",
+    "Categorical values": [
+      "Not Identified",
+      "Sadness",
+      "Anxiety",
+      "Fear",
+      "Anger",
+      "Guilt",
+      "Shame",
+      "Calm",
+      "Hope",
+      "Mixed"
+    ],
+    "Numerical values": "regression from 0 to 1 scale",
+    "Numerical dimension": "Clarity and differentiation of emotional responses in context",
+    "Range Explanation": {
+      "dimension": "Clarity and differentiation of emotional responses in context",
+      "direction": "Higher values indicate clearer emotional identification and formulation linkage, not greater distress.",
+      "anchors": {
+        "0.00": "No relevant emotion is identified.",
+        "0.25": "General distress is reported without differentiation.",
+        "0.50": "A primary emotion is identified with approximate context.",
+        "0.75": "Multiple emotions or shifts are differentiated and linked to relevant cognitions or events.",
+        "1.00": "Emotions are precisely differentiated, contextualized, intensity-rated, and coherently linked within the formulation."
+      },
+      "missing_value_policy": "Use null when the dimension is not assessed or evidence is insufficient; do not encode missing information as 0."
+    }
+  },
+  {
+    "Variable Name": "Behaviors",
+    "Description": "Observable actions and response patterns associated with triggering situations, thoughts, and emotions, including avoidance and adaptive engagement.",
+    "Categorical values": [
+      "Not Identified",
+      "Avoidance",
+      "Withdrawal",
+      "Reassurance Seeking",
+      "Checking/Ritual",
+      "Inactivity",
+      "Approach/Engagement",
+      "Adaptive Coping",
+      "Other"
+    ],
+    "Numerical values": "regression from 0 to 1 scale",
+    "Numerical dimension": "Clarity and functional understanding of relevant behavior patterns",
+    "Range Explanation": {
+      "dimension": "Clarity and functional understanding of relevant behavior patterns",
+      "direction": "Higher values indicate more complete behavioral characterization.",
+      "anchors": {
+        "0.00": "No relevant behavior is identified.",
+        "0.25": "A broad behavior is mentioned without context or function.",
+        "0.50": "A specific behavior is identified and linked to a problem situation.",
+        "0.75": "Antecedents, short-term consequences, and maintaining effects are mostly characterized.",
+        "1.00": "Behavior patterns are clearly operationalized across contexts, functionally analyzed, and linked to both maintenance and possible intervention targets."
+      },
+      "missing_value_policy": "Use null when the dimension is not assessed or evidence is insufficient; do not encode missing information as 0."
+    }
+  },
+  {
+    "Variable Name": "Physiological Responses",
+    "Description": "Bodily reactions associated with triggering situations and emotional responses, such as arousal, tension, heart-rate change, gastrointestinal sensations, fatigue, or sleep-related effects.",
+    "Categorical values": [
+      "Not Assessed",
+      "Arousal",
+      "Tension",
+      "Breathing Change",
+      "Cardiovascular Sensation",
+      "Gastrointestinal Sensation",
+      "Fatigue",
+      "Sleep-Related",
+      "Other"
+    ],
+    "Numerical values": "regression from 0 to 1 scale",
+    "Numerical dimension": "Clarity and contextual linkage of physiological responses",
+    "Range Explanation": {
+      "dimension": "Clarity and contextual linkage of physiological responses",
+      "direction": "Higher values indicate clearer assessment and integration of physiological responses.",
+      "anchors": {
+        "0.00": "Physiological responses have not been assessed.",
+        "0.25": "A general bodily reaction is mentioned without clear context.",
+        "0.50": "One or more specific responses are identified in a relevant situation.",
+        "0.75": "Responses are linked to triggers, emotions, and behavior with approximate intensity or timing.",
+        "1.00": "Relevant physiological patterns are precisely characterized, intensity-rated where useful, and integrated into the formulation."
+      },
+      "missing_value_policy": "Use null when the dimension is not assessed or evidence is insufficient; do not encode missing information as 0."
+    }
+  },
+  {
+    "Variable Name": "Intermediate Assumptions",
+    "Description": "Conditional beliefs, rules, and attitudes that organize behavior and connect automatic thoughts with deeper core beliefs.",
+    "Categorical values": [
+      "Not Identified",
+      "Conditional Assumption",
+      "Rule/Should Statement",
+      "Attitude",
+      "Partially Adaptive",
+      "Maladaptive",
+      "Revised/Adaptive"
+    ],
+    "Numerical values": "regression from 0 to 1 scale",
+    "Numerical dimension": "Clarity, evidence, and formulation integration of intermediate assumptions",
+    "Range Explanation": {
+      "dimension": "Clarity, evidence, and formulation integration of intermediate assumptions",
+      "direction": "Higher values indicate clearer and better-supported identification, not greater maladaptiveness.",
+      "anchors": {
+        "0.00": "No intermediate assumption is identified.",
+        "0.25": "A possible rule or assumption is hypothesized with little supporting evidence.",
+        "0.50": "A relevant assumption is stated and linked to at least one recurring pattern.",
+        "0.75": "The assumption is supported across situations and linked to automatic thoughts, behavior, or core beliefs.",
+        "1.00": "Key assumptions are explicit, collaboratively validated, evaluated, and integrated into treatment decisions."
+      },
+      "missing_value_policy": "Use null when the dimension is not assessed or evidence is insufficient; do not encode missing information as 0."
+    }
+  },
+  {
+    "Variable Name": "Core Beliefs",
+    "Description": "Broad, deeply held beliefs about the self, other people, or the world that organize recurrent patterns and may underlie persistent difficulties.",
+    "Categorical values": [
+      "Not Identified",
+      "Negative-Self",
+      "Negative-Others",
+      "Negative-World",
+      "Helplessness",
+      "Unlovability",
+      "Worthlessness",
+      "Adaptive",
+      "Under Evaluation"
+    ],
+    "Numerical values": "regression from 0 to 1 scale",
+    "Numerical dimension": "Clarity, evidence, and formulation integration of core beliefs",
+    "Range Explanation": {
+      "dimension": "Clarity, evidence, and formulation integration of core beliefs",
+      "direction": "Higher values indicate clearer and better-supported identification, not stronger maladaptive belief conviction.",
+      "anchors": {
+        "0.00": "No core belief is identified.",
+        "0.25": "A possible core belief is hypothesized but remains vague or unsupported.",
+        "0.50": "A plausible core belief is articulated and linked to some recurrent experiences.",
+        "0.75": "The belief is linked across situations, assumptions, thoughts, emotions, and behavior with substantial supporting evidence.",
+        "1.00": "Key core beliefs are clearly articulated, collaboratively validated, conviction-rated, and used appropriately to guide intervention."
+      },
+      "missing_value_policy": "Use null when the dimension is not assessed or evidence is insufficient; do not encode missing information as 0."
+    }
+  },
+  {
+    "Variable Name": "Maintaining Factors",
+    "Description": "Processes that perpetuate the patient's difficulties, such as avoidance, safety behaviors, rumination, inactivity, reinforcement patterns, interpersonal cycles, or environmental contingencies.",
+    "Categorical values": [
+      "Not Identified",
+      "Avoidance",
+      "Safety Behavior",
+      "Rumination/Worry",
+      "Inactivity",
+      "Reinforcement Pattern",
+      "Interpersonal Cycle",
+      "Environmental Factor",
+      "Multiple Interacting Factors"
+    ],
+    "Numerical values": "regression from 0 to 1 scale",
+    "Numerical dimension": "Clarity and evidential support for mechanisms maintaining the problem",
+    "Range Explanation": {
+      "dimension": "Clarity and evidential support for mechanisms maintaining the problem",
+      "direction": "Higher values indicate clearer, better-supported understanding of maintenance.",
+      "anchors": {
+        "0.00": "No maintaining factor is identified.",
+        "0.25": "A possible maintaining process is mentioned without a clear mechanism.",
+        "0.50": "At least one plausible maintaining factor is linked to persistence of the problem.",
+        "0.75": "Several maintaining links are supported and prioritized as treatment targets.",
+        "1.00": "The formulation specifies interacting maintaining mechanisms, supporting evidence, feedback loops, and clear intervention implications."
+      },
+      "missing_value_policy": "Use null when the dimension is not assessed or evidence is insufficient; do not encode missing information as 0."
+    }
+  },
+  {
+    "Variable Name": "Case Formulation Currency and Revision",
+    "Description": "Degree to which the case formulation is treated as an evolving model and updated when new clinical information, outcomes, or contradictions emerge.",
+    "Categorical values": [
+      "Outdated/Static",
+      "Revision Overdue",
+      "Partially Updated",
+      "Current",
+      "Actively Refined"
+    ],
+    "Numerical values": "regression from 0 to 1 scale",
+    "Numerical dimension": "Currency and responsiveness of formulation revision",
+    "Range Explanation": {
+      "dimension": "Currency and responsiveness of formulation revision",
+      "direction": "Higher values indicate a more current and adaptively revised formulation.",
+      "anchors": {
+        "0.00": "The formulation is absent, clearly outdated, or retained despite contradictory evidence.",
+        "0.25": "Important new information has emerged, but revision has not meaningfully occurred.",
+        "0.50": "Some elements have been updated, while important inconsistencies remain.",
+        "0.75": "The formulation reflects most current information and is revised when clinically indicated.",
+        "1.00": "The formulation is explicitly reviewed, collaboratively refined, and updated promptly in response to new evidence and treatment outcomes."
+      },
+      "missing_value_policy": "Use null when the dimension is not assessed or evidence is insufficient; do not encode missing information as 0."
+    }
+  },
+  {
+    "Variable Name": "Symptom Severity",
+    "Description": "Current severity of target symptoms, preferably tracked longitudinally with appropriate standardized measures such as PHQ-9, GAD-7, PCL-5, or another condition-relevant instrument.",
+    "Categorical values": [
+      "None/Minimal",
+      "Mild",
+      "Moderate",
+      "Severe",
+      "Very Severe/Acute",
+      "Not Assessed"
+    ],
+    "Numerical values": "regression from 0 to 1 scale",
+    "Numerical dimension": "Normalized severity of the target symptom domain",
+    "Range Explanation": {
+      "dimension": "Normalized severity of the target symptom domain",
+      "direction": "Higher values indicate greater symptom severity.",
+      "anchors": {
+        "0.00": "No or minimal clinically relevant target symptoms.",
+        "0.25": "Mild symptoms with limited distress or interference.",
+        "0.50": "Moderate symptoms with meaningful distress or interference.",
+        "0.75": "Severe symptoms with substantial distress or functional impact.",
+        "1.00": "Very severe or acute symptoms requiring prompt clinical review."
+      },
+      "missing_value_policy": "Use null when the dimension is not assessed or evidence is insufficient; do not encode missing information as 0.",
+      "scoring_note": "Retain the raw instrument score, instrument name, date, and instrument-specific severity band. The normalized 0–1 value must not replace validated scoring or clinical interpretation."
+    }
+  },
+  {
+    "Variable Name": "Patient-Defined Treatment Goals",
+    "Description": "Clarity, specificity, relevance, and collaborative agreement of goals that reflect changes the patient wants from therapy.",
+    "Categorical values": [
+      "Absent",
+      "Vague",
+      "Primarily Therapist-Defined",
+      "Patient-Defined but Broad",
+      "Specific and Agreed",
+      "Revised"
+    ],
+    "Numerical values": "regression from 0 to 1 scale",
+    "Numerical dimension": "Clarity, patient ownership, specificity, and agreement of treatment goals",
+    "Range Explanation": {
+      "dimension": "Clarity, patient ownership, specificity, and agreement of treatment goals",
+      "direction": "Higher values indicate clearer, more collaborative, and more patient-owned goals.",
+      "anchors": {
+        "0.00": "No treatment goal is identified or agreed.",
+        "0.25": "A broad desired change is mentioned but remains vague or externally imposed.",
+        "0.50": "Goals are partly defined, with limited patient ownership, specificity, or agreement.",
+        "0.75": "Goals are mostly patient-defined, clinically coherent, specific, and mutually agreed.",
+        "1.00": "Goals are fully patient-defined, prioritized, observable or measurable where appropriate, mutually agreed, and actively used to guide treatment."
+      },
+      "missing_value_policy": "Use null when the dimension is not assessed or evidence is insufficient; do not encode missing information as 0."
+    }
+  },
+  {
+    "Variable Name": "Session Agenda Completion",
+    "Description": "Degree to which the collaboratively agreed session agenda is addressed, including clinically appropriate and collaboratively negotiated revisions.",
+    "Categorical values": [
+      "Not Set",
+      "Not Addressed",
+      "Partially Completed",
+      "Mostly Completed",
+      "Fully Completed",
+      "Collaboratively Revised"
+    ],
+    "Numerical values": "regression from 0 to 1 scale",
+    "Numerical dimension": "Completion of the agreed agenda with appropriate collaborative flexibility",
+    "Range Explanation": {
+      "dimension": "Completion of the agreed agenda with appropriate collaborative flexibility",
+      "direction": "Higher values indicate better completion and collaborative management, not rigid adherence.",
+      "anchors": {
+        "0.00": "No agenda was set, or agreed priorities were not addressed.",
+        "0.25": "A small portion was addressed and the session remained substantially unfocused.",
+        "0.50": "Approximately half of the important agenda work was completed.",
+        "0.75": "Most priorities were addressed; deviations were minor or collaboratively managed.",
+        "1.00": "All clinically important priorities were addressed, or any revisions were explicitly collaborative and the patient agrees the session met its purpose."
+      },
+      "missing_value_policy": "Use null when the dimension is not assessed or evidence is insufficient; do not encode missing information as 0."
+    }
+  },
+  {
+    "Variable Name": "Homework Assignment Quality",
+    "Description": "Quality of the current between-session assignment, including clarity, rationale, collaboration, feasibility, formulation linkage, and planning for barriers and review.",
+    "Categorical values": [
+      "Not Assigned",
+      "Vague",
+      "Therapist-Imposed",
+      "Partially Specified",
+      "Clear and Collaborative",
+      "Adapted to Barriers"
+    ],
+    "Numerical values": "regression from 0 to 1 scale",
+    "Numerical dimension": "Quality and collaborative specificity of the homework assignment",
+    "Range Explanation": {
+      "dimension": "Quality and collaborative specificity of the homework assignment",
+      "direction": "Higher values indicate a better-designed assignment.",
+      "anchors": {
+        "0.00": "No assignment is made when between-session practice is clinically indicated, or the task is unsafe.",
+        "0.25": "A vague task is suggested without rationale, steps, or review plan.",
+        "0.50": "A task is specified but is insufficiently collaborative, feasible, or formulation-linked.",
+        "0.75": "The task is mostly clear, relevant, and feasible, with some collaborative planning.",
+        "1.00": "The assignment is specific, collaborative, formulation-linked, feasible, includes anticipated barriers, and has a clear outcome-review plan."
+      },
+      "missing_value_policy": "Use null when the dimension is not assessed or evidence is insufficient; do not encode missing information as 0."
+    }
+  },
+  {
+    "Variable Name": "Homework Adherence",
+    "Description": "Degree to which the patient attempts and completes the agreed homework, interpreted collaboratively and without treating noncompletion as simple noncompliance.",
+    "Categorical values": [
+      "Not Attempted",
+      "Minimal Attempt",
+      "Partially Completed",
+      "Mostly Completed",
+      "Fully Completed",
+      "Exceeded/Generalized",
+      "Barriers Prevented Completion"
+    ],
+    "Numerical values": "regression from 0 to 1 scale",
+    "Numerical dimension": "Extent of meaningful attempt and completion of the agreed assignment",
+    "Range Explanation": {
+      "dimension": "Extent of meaningful attempt and completion of the agreed assignment",
+      "direction": "Higher values indicate greater meaningful completion.",
+      "anchors": {
+        "0.00": "No meaningful attempt occurred.",
+        "0.25": "A minimal attempt occurred or only a very small component was completed.",
+        "0.50": "A substantial portion was attempted, but important steps were incomplete.",
+        "0.75": "Most agreed steps were completed with usable observations.",
+        "1.00": "The assignment was fully completed as agreed, with adequate records or reflection where relevant."
+      },
+      "missing_value_policy": "Use null when the dimension is not assessed or evidence is insufficient; do not encode missing information as 0.",
+      "scoring_note": "Interpret the value alongside barriers, assignment quality, and clinical appropriateness; a low score should trigger collaborative troubleshooting rather than blame."
+    }
+  },
+  {
+    "Variable Name": "Homework Outcomes and Learning",
+    "Description": "Clinical and formulation-relevant outcomes of homework, including learning, symptom or behavior change, prediction testing, barriers, and generalization.",
+    "Categorical values": [
+      "Not Reviewed",
+      "No Usable Information",
+      "Mixed/Unclear Outcome",
+      "Useful Learning",
+      "Clear Improvement",
+      "Unexpected Learning",
+      "Negative Effect"
+    ],
+    "Numerical values": "regression from 0 to 1 scale",
+    "Numerical dimension": "Degree of useful learning or adaptive clinical impact obtained from homework",
+    "Range Explanation": {
+      "dimension": "Degree of useful learning or adaptive clinical impact obtained from homework",
+      "direction": "Higher values indicate more useful learning or adaptive impact.",
+      "anchors": {
+        "0.00": "The outcome is not reviewed, is unsafe, or provides no usable information.",
+        "0.25": "Little learning or change is obtained and barriers are not yet understood.",
+        "0.50": "Mixed or modest learning is obtained, with partial formulation relevance.",
+        "0.75": "The task produces useful learning, a meaningful test of a prediction, or some adaptive change.",
+        "1.00": "The task produces strong, transferable learning or clear adaptive change that meaningfully informs treatment."
+      },
+      "missing_value_policy": "Use null when the dimension is not assessed or evidence is insufficient; do not encode missing information as 0.",
+      "scoring_note": "Record adverse or negative effects categorically and review them clinically; do not disguise deterioration as a low but otherwise routine score."
+    }
+  },
+  {
+    "Variable Name": "Automatic Thought Conviction",
+    "Description": "The patient's degree of belief in a specified target automatic thought at a specified time, ideally recorded before and after intervention.",
+    "Categorical values": [
+      "Very Low",
+      "Low",
+      "Moderate",
+      "High",
+      "Very High/Complete"
+    ],
+    "Numerical values": "regression from 0 to 1 scale",
+    "Numerical dimension": "Strength of conviction in the explicitly named target automatic thought",
+    "Range Explanation": {
+      "dimension": "Strength of conviction in the explicitly named target automatic thought",
+      "direction": "Higher values indicate stronger conviction in the target thought.",
+      "anchors": {
+        "0.00": "No belief in the target thought.",
+        "0.25": "Low conviction; the thought is considered possible but unlikely.",
+        "0.50": "Moderate conviction; the patient is uncertain or sees the thought as about equally likely and unlikely.",
+        "0.75": "High conviction; the thought is largely accepted as true.",
+        "1.00": "Complete or near-complete conviction; the thought is experienced as unquestionably true."
+      },
+      "missing_value_policy": "Use null when the dimension is not assessed or evidence is insufficient; do not encode missing information as 0.",
+      "scoring_note": "Always store the target thought and time point. For an alternative thought, score it as a separate variable instance rather than mixing both beliefs."
+    }
+  },
+  {
+    "Variable Name": "Emotional Intensity",
+    "Description": "Strength of a specified emotional response in context, recorded longitudinally and, when useful, before and after an intervention.",
+    "Categorical values": [
+      "None",
+      "Mild",
+      "Moderate",
+      "High",
+      "Extreme"
+    ],
+    "Numerical values": "regression from 0 to 1 scale",
+    "Numerical dimension": "Intensity of the explicitly named emotion",
+    "Range Explanation": {
+      "dimension": "Intensity of the explicitly named emotion",
+      "direction": "Higher values indicate greater emotional intensity.",
+      "anchors": {
+        "0.00": "No detectable or reported intensity of the target emotion.",
+        "0.25": "Mild intensity; noticeable but easily manageable.",
+        "0.50": "Moderate intensity; clearly distressing or influential but manageable.",
+        "0.75": "High intensity; strongly affects attention, behavior, or participation.",
+        "1.00": "Extreme intensity; overwhelming or acutely destabilizing and requiring immediate clinical judgment."
+      },
+      "missing_value_policy": "Use null when the dimension is not assessed or evidence is insufficient; do not encode missing information as 0.",
+      "scoring_note": "Store the emotion label, context, reporter, and time point. Do not infer precision that the available evidence does not support."
+    }
+  },
+  {
+    "Variable Name": "Behavioral Avoidance versus Engagement",
+    "Description": "Position on the continuum from avoidance, withdrawal, or safety behavior to direct, adaptive engagement with relevant situations and goals.",
+    "Categorical values": [
+      "Complete Avoidance",
+      "Predominantly Avoidant",
+      "Mixed/Partial Engagement",
+      "Mostly Engaged",
+      "Active Adaptive Engagement"
+    ],
+    "Numerical values": "regression from 0 to 1 scale",
+    "Numerical dimension": "Degree of adaptive engagement relative to avoidance",
+    "Range Explanation": {
+      "dimension": "Degree of adaptive engagement relative to avoidance",
+      "direction": "Higher values indicate greater adaptive engagement and less avoidance.",
+      "anchors": {
+        "0.00": "Complete or near-complete avoidance; the relevant situation or action is not approached.",
+        "0.25": "Predominantly avoidant, with rare or highly restricted engagement and substantial safety behavior.",
+        "0.50": "Mixed pattern; some approach occurs, but avoidance remains important.",
+        "0.75": "Mostly engaged; the patient approaches relevant situations with limited residual avoidance.",
+        "1.00": "Active, flexible, and sustained engagement with little or no clinically relevant avoidance or safety behavior."
+      },
+      "missing_value_policy": "Use null when the dimension is not assessed or evidence is insufficient; do not encode missing information as 0."
+    }
+  },
+  {
+    "Variable Name": "Readiness and Motivation for Change",
+    "Description": "The patient's current willingness, confidence, and commitment to consider or perform formulation-relevant change.",
+    "Categorical values": [
+      "Not Ready",
+      "Resistant/Unwilling",
+      "Ambivalent",
+      "Considering",
+      "Ready",
+      "Committed/Acting"
+    ],
+    "Numerical values": "regression from 0 to 1 scale",
+    "Numerical dimension": "Readiness and commitment to engage in change",
+    "Range Explanation": {
+      "dimension": "Readiness and commitment to engage in change",
+      "direction": "Higher values indicate greater readiness and commitment.",
+      "anchors": {
+        "0.00": "The patient is not ready to consider change or declines the proposed direction.",
+        "0.25": "Low readiness; reasons against change dominate and active steps are unlikely.",
+        "0.50": "Ambivalent; meaningful reasons both for and against change are present.",
+        "0.75": "The patient is leaning toward change and willing to consider a small step.",
+        "1.00": "The patient expresses clear motivation, commitment, and readiness to take or sustain relevant action."
+      },
+      "missing_value_policy": "Use null when the dimension is not assessed or evidence is insufficient; do not encode missing information as 0.",
+      "scoring_note": "Readiness is intervention- and time-specific; reassess rather than treating it as a fixed patient trait."
+    }
+  },
+  {
+    "Variable Name": "Therapeutic Alliance - Longitudinal Overall",
+    "Description": "Overall quality and stability of the therapeutic alliance across sessions, integrating goal agreement, task agreement, and interpersonal bond rather than relying on a single-session impression.",
+    "Categorical values": [
+      "Persistently Ruptured",
+      "Weak/Unstable",
+      "Adequate",
+      "Strong",
+      "Very Strong and Stable",
+      "Repairing"
+    ],
+    "Numerical values": "regression from 0 to 1 scale",
+    "Numerical dimension": "Longitudinal strength, stability, and repair capacity of the therapeutic alliance",
+    "Range Explanation": {
+      "dimension": "Longitudinal strength, stability, and repair capacity of the therapeutic alliance",
+      "direction": "Higher values indicate a stronger and more stable longitudinal alliance.",
+      "anchors": {
+        "0.00": "Persistent major rupture, lack of collaboration, or loss of workable treatment relationship.",
+        "0.25": "Weak or unstable alliance with recurrent unresolved strain.",
+        "0.50": "Adequate working alliance that supports treatment but has limitations or variability.",
+        "0.75": "Strong alliance with reliable collaboration and successful handling of minor strains.",
+        "1.00": "Very strong, stable alliance across time, with clear mutual trust, collaboration, and effective rupture repair."
+      },
+      "missing_value_policy": "Use null when the dimension is not assessed or evidence is insufficient; do not encode missing information as 0.",
+      "scoring_note": "Aggregate evidence across multiple sessions when possible. A single difficult session should not automatically determine the longitudinal score."
+    }
+  },
+  {
+    "Variable Name": "Therapeutic Alliance - Goal Agreement",
+    "Description": "Degree to which therapist and patient agree on the aims and desired outcomes of therapy.",
+    "Categorical values": [
+      "No Agreement",
+      "Major Disagreement",
+      "Partial Agreement",
+      "Broad Agreement",
+      "Clear Collaborative Agreement"
+    ],
+    "Numerical values": "regression from 0 to 1 scale",
+    "Numerical dimension": "Agreement and collaboration regarding therapeutic goals",
+    "Range Explanation": {
+      "dimension": "Agreement and collaboration regarding therapeutic goals",
+      "direction": "Higher values indicate stronger agreement on goals.",
+      "anchors": {
+        "0.00": "No shared treatment goal exists.",
+        "0.25": "Major disagreement exists and prevents coordinated work.",
+        "0.50": "Some goals are shared, but important differences remain unresolved.",
+        "0.75": "Broad agreement exists, with only minor ambiguity or difference.",
+        "1.00": "Goals are clearly understood, meaningful to the patient, mutually agreed, and actively guide treatment."
+      },
+      "missing_value_policy": "Use null when the dimension is not assessed or evidence is insufficient; do not encode missing information as 0."
+    }
+  },
+  {
+    "Variable Name": "Therapeutic Alliance - Task Agreement",
+    "Description": "Degree to which therapist and patient agree on the therapeutic methods, session tasks, and between-session activities used to pursue the goals.",
+    "Categorical values": [
+      "No Agreement",
+      "Task Rejection",
+      "Partial Agreement",
+      "Broad Agreement",
+      "Clear Collaborative Agreement"
+    ],
+    "Numerical values": "regression from 0 to 1 scale",
+    "Numerical dimension": "Agreement and collaboration regarding therapeutic tasks",
+    "Range Explanation": {
+      "dimension": "Agreement and collaboration regarding therapeutic tasks",
+      "direction": "Higher values indicate stronger agreement and engagement with therapeutic tasks.",
+      "anchors": {
+        "0.00": "No shared understanding or agreement about therapeutic tasks.",
+        "0.25": "The patient rejects or cannot meaningfully engage with the proposed tasks.",
+        "0.50": "Some tasks are accepted, while important concerns or mismatches remain.",
+        "0.75": "Most tasks are understood and accepted, with minor reservations or adaptation needs.",
+        "1.00": "Tasks are clearly understood, collaboratively chosen, credible to the patient, and actively engaged with."
+      },
+      "missing_value_policy": "Use null when the dimension is not assessed or evidence is insufficient; do not encode missing information as 0."
+    }
+  },
+  {
+    "Variable Name": "Therapeutic Alliance - Interpersonal Bond",
+    "Description": "Quality of trust, respect, felt safety, empathy, and interpersonal connection between therapist and patient.",
+    "Categorical values": [
+      "Unsafe/Disconnected",
+      "Weak",
+      "Adequate",
+      "Strong",
+      "Very Strong"
+    ],
+    "Numerical values": "regression from 0 to 1 scale",
+    "Numerical dimension": "Strength and security of the interpersonal therapeutic bond",
+    "Range Explanation": {
+      "dimension": "Strength and security of the interpersonal therapeutic bond",
+      "direction": "Higher values indicate a stronger, safer, and more trusting bond.",
+      "anchors": {
+        "0.00": "The patient experiences the relationship as unsafe, invalidating, or disconnected.",
+        "0.25": "Trust and openness are low, and relational strain limits participation.",
+        "0.50": "The bond is adequate for treatment, although openness or trust may be variable.",
+        "0.75": "The patient generally feels understood, respected, and safe enough for open collaborative work.",
+        "1.00": "The bond is consistently strong, trusting, respectful, and resilient while preserving appropriate professional boundaries."
+      },
+      "missing_value_policy": "Use null when the dimension is not assessed or evidence is insufficient; do not encode missing information as 0."
+    }
+  }
+]

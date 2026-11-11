@@ -49,6 +49,73 @@ TOPAS_CONV_STATE_DIR = Path(
         str(TOPAS_RUNS_DIR / "sft_conv_state_acts_L22"),
     )
 ).expanduser().resolve()
+ABLATION_RUNS_DIR = Path(
+    os.getenv("STUDY_TOPAS_ABLATION_RUNS_DIR", str(MODEL_ROOT / "topas" / "ablation_runs"))
+).expanduser().resolve()
+
+
+def configured_path(variable: str, default: Path) -> Path:
+    return Path(os.getenv(variable, str(default))).expanduser().resolve()
+
+
+EXPERT_CONV_STATE_DIR = configured_path(
+    "STUDY_TOPAS_EXPERT_CONV_STATE_DIR",
+    ABLATION_RUNS_DIR / "sft_conv_state_acts_L22_Expert",
+)
+EXPERT_MACRO_POLICY_DIR = configured_path(
+    "STUDY_TOPAS_EXPERT_MACRO_POLICY_DIR", ABLATION_RUNS_DIR / "expert_O_22"
+)
+EXPERT_MICRO_POLICY_DIR = configured_path(
+    "STUDY_TOPAS_EXPERT_MICRO_POLICY_DIR", ABLATION_RUNS_DIR / "expert_P_22"
+)
+CHAT_CONV_STATE_DIR = configured_path(
+    "STUDY_TOPAS_CHAT_CONV_STATE_DIR",
+    ABLATION_RUNS_DIR / "sft_conv_state_acts_L22_Chat",
+)
+CHAT_MACRO_POLICY_DIR = configured_path(
+    "STUDY_TOPAS_CHAT_MACRO_POLICY_DIR", ABLATION_RUNS_DIR / "chat_O_22"
+)
+CHAT_MICRO_POLICY_DIR = configured_path(
+    "STUDY_TOPAS_CHAT_MICRO_POLICY_DIR", ABLATION_RUNS_DIR / "chat_P_22"
+)
+NO_CONV_RUNS_DIR = configured_path(
+    "STUDY_TOPAS_NO_CONV_RUNS_DIR", ABLATION_RUNS_DIR / "no_conv"
+)
+NO_CONV_MACRO_POLICY_DIR = configured_path(
+    "STUDY_TOPAS_NO_CONV_MACRO_POLICY_DIR",
+    NO_CONV_RUNS_DIR / "iql_policy_over_options_acts_L22",
+)
+NO_CONV_MICRO_POLICY_DIR = configured_path(
+    "STUDY_TOPAS_NO_CONV_MICRO_POLICY_DIR",
+    NO_CONV_RUNS_DIR / "iql_micro_policies_acts_L22",
+)
+NO_CONV_COMPONENTS_PATH = configured_path(
+    "STUDY_TOPAS_NO_CONV_COMPONENTS_PATH",
+    NO_CONV_MACRO_POLICY_DIR / "used_action_space.json",
+)
+FULL_RUNS_DIR = configured_path(
+    "STUDY_TOPAS_FULL_RUNS_DIR", MODEL_ROOT / "topas" / "full" / "old_runs"
+)
+FULL_MACRO_POLICY_DIR = configured_path(
+    "STUDY_TOPAS_FULL_MACRO_POLICY_DIR",
+    FULL_RUNS_DIR / "TOPAS_Options_withmemory22",
+)
+FULL_MICRO_POLICY_DIR = configured_path(
+    "STUDY_TOPAS_FULL_MICRO_POLICY_DIR",
+    FULL_RUNS_DIR / "TOPAS_Primitive_withmemory22",
+)
+FULL_CONV_STATE_DIR = configured_path(
+    "STUDY_TOPAS_FULL_CONV_STATE_DIR",
+    MODEL_ROOT / "topas" / "full" / "runs" / "sft_conv_state_acts_L22",
+)
+FULL_MEMORY_RETRIEVER_DIR = configured_path(
+    "STUDY_TOPAS_FULL_MEMORY_RETRIEVER_DIR",
+    FULL_RUNS_DIR / "TOPAS_Options_withmemory22_memory_retrieval",
+)
+FULL_KG_SCHEMA_PATH = configured_path(
+    "STUDY_TOPAS_FULL_KG_SCHEMA_PATH",
+    MODEL_ROOT / "topas" / "full" / "components" / "knowledge_graph.json",
+)
 
 
 def optional_directory(variable: str, default: Path) -> Path:
@@ -79,6 +146,12 @@ REQUIRED_PATHS = {
     "bundled TOPAS macro actions": SERVER_DIR / "assets" / "topa_components" / "macro_actions.json",
     "bundled TOPAS micro actions": SERVER_DIR / "assets" / "topa_components" / "micro_actions.json",
     "bundled TOPAS conversation states": SERVER_DIR / "assets" / "topa_components" / "conversation_states.json",
+    "bundled ablation policy runtime": SERVER_DIR / "ablation_runtime" / "agents.py",
+    "bundled latest TOPAS ablation agent": SERVER_DIR / "ablation_runtime" / "topa_agent.py",
+    "bundled expert components": SERVER_DIR / "assets" / "ablation_components" / "expert" / "macro_actions.json",
+    "bundled ChatGPT components": SERVER_DIR / "assets" / "ablation_components" / "chatgpt" / "macro_actions.json",
+    "bundled prompt-only components": SERVER_DIR / "assets" / "ablation_components" / "no_rl" / "macro_actions.json",
+    "bundled standalone KG annotator": SERVER_DIR / "topa" / "annotation" / "annotators" / "knowledge_graph.py",
     "Archer checkpoint": ARCHER_CHECKPOINT,
     "ARIA checkpoint": ARIA_CHECKPOINT,
     "Sweet-RL checkpoint": SWEET_RL_MODEL,
@@ -89,6 +162,34 @@ REQUIRED_PATHS = {
     "TOPAS intra-option policies": TOPAS_MICRO_POLICY_DIR,
     "TOPAS conversation-state actor": TOPAS_CONV_STATE_DIR / "actor.pt",
     "TOPAS conversation-state labels": TOPAS_CONV_STATE_DIR / "label_map.json",
+    "expert-components macro actor": EXPERT_MACRO_POLICY_DIR / "actor.pt",
+    "expert-components termination actor": EXPERT_MACRO_POLICY_DIR / "termination.pt",
+    "expert-components macro metadata": EXPERT_MACRO_POLICY_DIR / "metrics.json",
+    "expert-components micro policies": EXPERT_MICRO_POLICY_DIR,
+    "expert-components conversation-state actor": EXPERT_CONV_STATE_DIR / "actor.pt",
+    "expert-components conversation-state labels": EXPERT_CONV_STATE_DIR / "label_map.json",
+    "ChatGPT-components macro actor": CHAT_MACRO_POLICY_DIR / "actor.pt",
+    "ChatGPT-components termination actor": CHAT_MACRO_POLICY_DIR / "termination.pt",
+    "ChatGPT-components macro metadata": CHAT_MACRO_POLICY_DIR / "metrics.json",
+    "ChatGPT-components micro policies": CHAT_MICRO_POLICY_DIR,
+    "ChatGPT-components conversation-state actor": CHAT_CONV_STATE_DIR / "actor.pt",
+    "ChatGPT-components conversation-state labels": CHAT_CONV_STATE_DIR / "label_map.json",
+    "no-conversation-state macro actor": NO_CONV_MACRO_POLICY_DIR / "actor.pt",
+    "no-conversation-state termination actor": NO_CONV_MACRO_POLICY_DIR / "termination.pt",
+    "no-conversation-state macro metadata": NO_CONV_MACRO_POLICY_DIR / "model_meta.json",
+    "no-conversation-state action space": NO_CONV_COMPONENTS_PATH,
+    "no-conversation-state micro policies": NO_CONV_MICRO_POLICY_DIR,
+    "full TOPAS macro actor": FULL_MACRO_POLICY_DIR / "actor.pt",
+    "full TOPAS termination actor": FULL_MACRO_POLICY_DIR / "termination.pt",
+    "full TOPAS macro metadata": FULL_MACRO_POLICY_DIR / "model_meta.json",
+    "full TOPAS saved action space": FULL_MACRO_POLICY_DIR / "used_action_space.json",
+    "full TOPAS micro policies": FULL_MICRO_POLICY_DIR,
+    "full TOPAS conversation-state actor": FULL_CONV_STATE_DIR / "actor.pt",
+    "full TOPAS conversation-state labels": FULL_CONV_STATE_DIR / "label_map.json",
+    "full TOPAS memory retriever": FULL_MEMORY_RETRIEVER_DIR / "retriever.pt",
+    "full TOPAS memory retriever config": FULL_MEMORY_RETRIEVER_DIR / "run_config.json",
+    "full TOPAS memory candidate masks": FULL_MEMORY_RETRIEVER_DIR / "candidate_masks.npy",
+    "full TOPAS KG schema": FULL_KG_SCHEMA_PATH,
 }
 
 
@@ -106,6 +207,13 @@ def main() -> int:
         print(f"[{'OK' if exists else 'MISSING'}] {label}: {path}")
         if not exists:
             failures.append(label)
+
+    for variable in ("AZURE_OPENAI_ENDPOINT", "AZURE_OPENAI_API_KEY"):
+        value = os.getenv(variable, "").strip()
+        configured = bool(value) and not value.startswith("replace-with-")
+        print(f"[{'OK' if configured else 'MISSING'}] full TOPAS {variable}")
+        if not configured:
+            failures.append(f"full TOPAS {variable}")
 
     conda = conda_executable()
     if not conda:

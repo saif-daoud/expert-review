@@ -1,3 +1,4 @@
+import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -209,3 +210,52 @@ def test_gpu_allocator_uses_first_gpu_with_enough_free_memory(monkeypatch):
     allocator = inference_manager.GPUAllocator()
     assert allocator.candidates("base") == [2, 3]
     assert allocator.candidates("base", {2}) == [3]
+
+
+def test_queue_recovers_when_claim_temporarily_fails(monkeypatch, tmp_path: Path):
+    manager = inference_manager.InferenceManager(
+        tmp_path / "unused.sqlite3",
+        tmp_path,
+        mode="real",
+        gpu_allocator=FakeGPUAllocator(),
+    )
+    calls = 0
+
+    def flaky_claim():
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise sqlite3.OperationalError("database is locked")
+        manager._stop.set()
+        return None
+
+    monkeypatch.setattr(manager, "_claim_next_job", flaky_claim)
+    monkeypatch.setattr(manager, "_wait_after_queue_error", lambda: None)
+
+    manager._run()
+
+    assert calls == 2
+
+
+def test_health_reports_queue_thread_and_database_state(monkeypatch, tmp_path: Path):
+    database_path = tmp_path / "study.sqlite3"
+    with sqlite3.connect(database_path) as connection:
+        connection.execute(
+            "CREATE TABLE inference_jobs (status TEXT NOT NULL)"
+        )
+        connection.execute("INSERT INTO inference_jobs(status) VALUES ('queued')")
+
+    manager = inference_manager.InferenceManager(
+        database_path,
+        tmp_path,
+        mode="real",
+        gpu_allocator=FakeGPUAllocator(),
+    )
+
+    health = manager.health()
+
+    assert health["queue_depth"] == 1
+    assert health["busy"] is False
+    assert health["worker_thread_alive"] is False
+    assert health["database_ok"] is True
+    assert health["database_error"] is None

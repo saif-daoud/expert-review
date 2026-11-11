@@ -1,0 +1,124 @@
+[
+  {
+    "Variable Name": "Emotional Arousal Level",
+    "Description": "Tracks the intensity of the patient’s current emotional activation (e.g., distress, anxiety, sadness). High arousal may require grounding or validation before cognitive work, while low arousal allows deeper restructuring.",
+    "Categorical values": [
+      "very low",
+      "low",
+      "moderate",
+      "high",
+      "very high"
+    ],
+    "Numerical values": "0 = no emotional activation, 1 = extreme emotional activation"
+  },
+  {
+    "Variable Name": "Primary Emotion Type",
+    "Description": "Represents the dominant emotion expressed by the patient, guiding emotion-specific interventions (e.g., anxiety vs. guilt require different techniques).",
+    "Categorical values": [
+      "anxiety",
+      "sadness",
+      "anger",
+      "guilt/shame",
+      "fear",
+      "neutral",
+      "mixed"
+    ],
+    "Numerical values": "0 = no clear dominant emotion, 1 = very clearly defined dominant emotion"
+  },
+  {
+    "Variable Name": "Cognitive Distortion Salience",
+    "Description": "Indicates how strongly identifiable cognitive distortions (e.g., catastrophizing, overgeneralization) are present in the patient’s statements, guiding when to initiate cognitive restructuring.",
+    "Categorical values": [
+      "none",
+      "weak",
+      "moderate",
+      "strong",
+      "dominant"
+    ],
+    "Numerical values": "0 = no detectable distortion, 1 = distortion dominates thinking"
+  },
+  {
+    "Variable Name": "Insight into Thoughts–Emotions Link",
+    "Description": "Tracks the patient’s awareness that thoughts influence emotions and behaviors, which is critical for readiness to engage in CBT techniques.",
+    "Categorical values": [
+      "no insight",
+      "minimal insight",
+      "partial insight",
+      "good insight",
+      "strong insight"
+    ],
+    "Numerical values": "0 = no awareness, 1 = full understanding and articulation"
+  },
+  {
+    "Variable Name": "Behavioral Activation Level",
+    "Description": "Reflects the extent to which the patient is engaging in adaptive or avoidance-related behaviors, informing whether behavioral activation or exposure is appropriate.",
+    "Categorical values": [
+      "severely avoidant",
+      "avoidant",
+      "neutral",
+      "somewhat active",
+      "highly active"
+    ],
+    "Numerical values": "0 = complete avoidance/inactivity, 1 = consistent adaptive engagement"
+  },
+  {
+    "Variable Name": "Readiness for Change",
+    "Description": "Represents the patient’s motivational stage and willingness to try new perspectives or behaviors, guiding pacing and intervention intensity.",
+    "Categorical values": [
+      "precontemplation",
+      "contemplation",
+      "preparation",
+      "action",
+      "maintenance"
+    ],
+    "Numerical values": "0 = no readiness for change, 1 = fully ready and proactive"
+  },
+  {
+    "Variable Name": "Therapeutic Alliance Strength",
+    "Description": "Captures the level of trust, collaboration, and rapport between therapist and patient, which affects receptiveness to interventions.",
+    "Categorical values": [
+      "very weak",
+      "weak",
+      "moderate",
+      "strong",
+      "very strong"
+    ],
+    "Numerical values": "0 = no alliance, 1 = very strong collaborative bond"
+  },
+  {
+    "Variable Name": "Focus of Session",
+    "Description": "Tracks whether the session is currently oriented toward emotion processing, cognitive restructuring, behavioral planning, or meta-discussion, supporting state-aware action selection.",
+    "Categorical values": [
+      "emotion exploration",
+      "cognitive restructuring",
+      "behavioral planning",
+      "psychoeducation",
+      "meta/rapport"
+    ],
+    "Numerical values": "0 = unfocused or drifting, 1 = highly focused on a clear goal"
+  },
+  {
+    "Variable Name": "Patient Engagement Level",
+    "Description": "Measures how actively the patient participates (e.g., elaboration, reflection, asking questions), informing whether to probe, support, or re-engage.",
+    "Categorical values": [
+      "disengaged",
+      "minimally engaged",
+      "moderately engaged",
+      "highly engaged",
+      "overly verbose"
+    ],
+    "Numerical values": "0 = fully disengaged, 1 = fully engaged and responsive"
+  },
+  {
+    "Variable Name": "Emotional Regulation Capacity (In-Session)",
+    "Description": "Assesses the patient’s ability to tolerate and regulate emotions during the conversation, guiding whether regulation skills are needed before deeper work.",
+    "Categorical values": [
+      "very poor",
+      "poor",
+      "moderate",
+      "good",
+      "excellent"
+    ],
+    "Numerical values": "0 = unable to regulate emotions, 1 = fully able to self-regulate"
+  }
+]

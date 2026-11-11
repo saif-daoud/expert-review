@@ -1,0 +1,433 @@
+[
+  {
+    "name": "Session-Structuring Actions",
+    "description": "Actions that organize each CBT session collaboratively, maintain focus, connect sessions over time, and translate discussion into between-session practice.",
+    "goal": {
+      "objective": "Create a predictable, collaborative, and clinically focused session structure.",
+      "success_levels": {
+        "ideal": "The agenda is jointly set, priority problems are addressed, progress and homework are reviewed, summaries support shared understanding, and the session ends with feedback and a clear new assignment.",
+        "acceptable": "Most structural elements are present, but one or more elements are brief, incomplete, or insufficiently collaborative.",
+        "unsuccessful": "The session is unstructured, therapist-dominated, disconnected from prior work, or ends without shared understanding and an actionable plan."
+      },
+      "reward_hint": "The patient can state the agenda and key conclusions, participates in prioritization, and understands the agreed homework."
+    },
+    "states": [
+      "At the beginning of each session",
+      "When several problems compete for attention",
+      "During transitions between topics",
+      "At the end of each session",
+      "When continuity across sessions is weak"
+    ],
+    "confidence_score": 1.0,
+    "micro_actions": [
+      {
+        "name": "Collaborative Agenda Setting",
+        "description": "Invite the patient to propose topics, add clinically relevant priorities, negotiate scope, and confirm a shared agenda.",
+        "states": [
+          "Session opening",
+          "Multiple concerns are present",
+          "Focus is unclear"
+        ],
+        "confidence_score": 1.0
+      },
+      {
+        "name": "Mood and Symptom Check-In",
+        "description": "Briefly assess current mood, symptom change, important events, functioning, and any clinically relevant deterioration since the previous contact.",
+        "states": [
+          "Session opening",
+          "A change in presentation is observed",
+          "Progress monitoring is due"
+        ],
+        "confidence_score": 1.0
+      },
+      {
+        "name": "Review Previous Homework",
+        "description": "Review whether the previous assignment was attempted, what happened, what was learned, and what barriers affected completion.",
+        "states": [
+          "After the initial check-in",
+          "Homework was assigned previously",
+          "Adherence or outcomes are unclear"
+        ],
+        "confidence_score": 1.0
+      },
+      {
+        "name": "Prioritize One or Two Target Problems",
+        "description": "Select one or two formulation-relevant problems that can be addressed meaningfully within the available session time.",
+        "states": [
+          "Agenda contains several topics",
+          "Time is limited",
+          "The session becomes diffuse"
+        ],
+        "confidence_score": 1.0
+      },
+      {
+        "name": "Provide Periodic Summaries",
+        "description": "Summarize key links, conclusions, and decisions during the session, then invite correction or additions from the patient.",
+        "states": [
+          "After complex discussion",
+          "Before changing topics",
+          "Understanding appears uncertain"
+        ],
+        "confidence_score": 1.0
+      },
+      {
+        "name": "Elicit End-of-Session Feedback",
+        "description": "Ask what was useful, unclear, uncomfortable, or missing and use the response to improve subsequent work.",
+        "states": [
+          "Session closing",
+          "The patient appeared disengaged",
+          "A difficult intervention occurred"
+        ],
+        "confidence_score": 1.0
+      },
+      {
+        "name": "Assign New Homework",
+        "description": "Collaboratively define a specific, feasible, formulation-linked task, including rationale, steps, timing, anticipated barriers, and how outcomes will be reviewed.",
+        "states": [
+          "Session closing",
+          "A skill requires practice",
+          "A hypothesis should be tested between sessions"
+        ],
+        "confidence_score": 1.0
+      }
+    ]
+  },
+  {
+    "name": "Therapeutic Relationship Actions",
+    "description": "Actions that strengthen collaboration, understanding, trust, and repair while preserving the patient's active role in treatment.",
+    "goal": {
+      "objective": "Maintain a collaborative therapeutic alliance characterized by agreement on goals, agreement on tasks, and a workable interpersonal bond.",
+      "success_levels": {
+        "ideal": "The patient feels heard and respected, openly contributes to goals and tasks, understands the work, provides feedback, and alliance strains are identified and repaired.",
+        "acceptable": "The relationship is adequate for treatment, but feedback, collaboration, or repair is inconsistent.",
+        "unsuccessful": "The patient feels misunderstood, pressured, excluded, or persistently disengaged, and relational strain is not addressed."
+      },
+      "reward_hint": "The patient communicates openly, corrects misunderstandings, collaborates on decisions, and remains engaged after disagreements."
+    },
+    "states": [
+      "Throughout all sessions",
+      "When distress or hesitation is expressed",
+      "When goals or tasks are negotiated",
+      "When misunderstanding, disagreement, withdrawal, or disengagement appears"
+    ],
+    "confidence_score": 1.0,
+    "micro_actions": [
+      {
+        "name": "Reflective Listening",
+        "description": "Reflect the patient's meaning, emotion, and perspective accurately without prematurely interpreting or redirecting.",
+        "states": [
+          "The patient describes an experience",
+          "Emotion is expressed",
+          "Meaning is unclear"
+        ],
+        "confidence_score": 1.0
+      },
+      {
+        "name": "Empathic Validation",
+        "description": "Communicate that the patient's emotional response is understandable in context without necessarily endorsing every interpretation or conclusion.",
+        "states": [
+          "Distress, shame, fear, anger, or discouragement is expressed",
+          "The patient anticipates judgment"
+        ],
+        "confidence_score": 1.0
+      },
+      {
+        "name": "Clarification",
+        "description": "Ask focused, non-assumptive questions to resolve ambiguity and check the accuracy of the therapist's understanding.",
+        "states": [
+          "The account is unclear",
+          "Different interpretations are possible",
+          "A formulation link is uncertain"
+        ],
+        "confidence_score": 1.0
+      },
+      {
+        "name": "Collaborative Goal Negotiation",
+        "description": "Develop or revise treatment goals jointly so they remain meaningful to the patient and clinically coherent.",
+        "states": [
+          "Treatment planning",
+          "Goals conflict or become outdated",
+          "Motivation is low"
+        ],
+        "confidence_score": 1.0
+      },
+      {
+        "name": "Check Patient Understanding",
+        "description": "Ask the patient to explain key ideas, rationales, or plans in their own words and correct misunderstandings collaboratively.",
+        "states": [
+          "After explanation or summary",
+          "Before homework",
+          "Confusion or passive agreement is suspected"
+        ],
+        "confidence_score": 1.0
+      },
+      {
+        "name": "Elicit Patient Feedback",
+        "description": "Invite direct feedback about the session, intervention, pace, fit, and therapeutic relationship.",
+        "states": [
+          "During or after an intervention",
+          "Session closing",
+          "Discomfort or disengagement is observed"
+        ],
+        "confidence_score": 1.0
+      },
+      {
+        "name": "Repair Alliance Ruptures",
+        "description": "Name possible tension or withdrawal, invite the patient's perspective, acknowledge the therapist's contribution when relevant, and renegotiate goals or tasks.",
+        "states": [
+          "Disagreement emerges",
+          "The patient withdraws or disengages",
+          "Trust or collaboration decreases"
+        ],
+        "confidence_score": 1.0
+      }
+    ]
+  },
+  {
+    "name": "Cognitive Interventions",
+    "description": "Actions that help the patient identify and evaluate automatic thoughts, distortions, assumptions, and core beliefs through guided discovery rather than persuasion.",
+    "goal": {
+      "objective": "Increase cognitive awareness and flexibility while supporting the patient's own evidence-based conclusions.",
+      "success_levels": {
+        "ideal": "The patient identifies relevant cognitions, evaluates them with balanced evidence, develops credible alternatives, and can apply the process with increasing independence.",
+        "acceptable": "The patient participates and reaches partial insight or a tentative alternative with therapist support.",
+        "unsuccessful": "The intervention is leading, argumentative, disconnected from the formulation, or produces superficial agreement without patient discovery."
+      },
+      "reward_hint": "The patient generates links, evidence, and balanced alternatives in their own words and reports a meaningful shift in conviction or emotion."
+    },
+    "states": [
+      "A triggering situation and emotional response have been identified",
+      "Automatic thoughts or beliefs appear linked to distress or behavior",
+      "A recurrent pattern requires deeper belief work",
+      "The patient is sufficiently regulated and willing to examine the cognition"
+    ],
+    "confidence_score": 1.0,
+    "micro_actions": [
+      {
+        "name": "Guided Socratic Questioning",
+        "description": "Use open, curious, non-leading questions that help the patient examine meanings, assumptions, evidence, and alternatives.",
+        "states": [
+          "A cognition is identified",
+          "The patient is able to reflect",
+          "Guided discovery is appropriate"
+        ],
+        "confidence_score": 1.0,
+        "delivery_requirement": "Questions should facilitate patient discovery rather than steer the patient toward a predetermined answer."
+      },
+      {
+        "name": "Identify Automatic Thoughts",
+        "description": "Elicit the specific words, images, or meanings that occurred in a triggering situation and connect them with emotion and behavior.",
+        "states": [
+          "A recent problem event is discussed",
+          "Emotion intensified in a specific context"
+        ],
+        "confidence_score": 1.0
+      },
+      {
+        "name": "Identify Cognitive Distortions",
+        "description": "Collaboratively identify recurring thinking patterns such as catastrophizing, overgeneralization, or all-or-nothing thinking without using labels as criticism.",
+        "states": [
+          "A thought pattern is evident",
+          "Pattern recognition may improve understanding"
+        ],
+        "confidence_score": 1.0
+      },
+      {
+        "name": "Examine Evidence For and Against Beliefs",
+        "description": "Review concrete evidence supporting and contradicting a target cognition, including evidence quality and alternative explanations.",
+        "states": [
+          "A target thought or belief is sufficiently clear",
+          "Conviction can be rated"
+        ],
+        "confidence_score": 1.0
+      },
+      {
+        "name": "Generate Balanced Alternative Interpretations",
+        "description": "Support the patient in constructing a realistic, personally credible interpretation that integrates the available evidence.",
+        "states": [
+          "Evidence has been examined",
+          "The initial interpretation appears incomplete or biased"
+        ],
+        "confidence_score": 1.0
+      },
+      {
+        "name": "Decatastrophizing",
+        "description": "Explore the feared outcome, its probability, coping possibilities, and the most likely outcome to reduce catastrophic overestimation.",
+        "states": [
+          "Catastrophic prediction is prominent",
+          "The patient can examine feared consequences safely"
+        ],
+        "confidence_score": 1.0
+      },
+      {
+        "name": "Downward-Arrow Technique",
+        "description": "Use repeated meaning-focused questions to identify deeper assumptions or core beliefs underlying an automatic thought.",
+        "states": [
+          "Recurrent automatic thoughts persist",
+          "Deeper belief work is clinically indicated"
+        ],
+        "confidence_score": 1.0
+      },
+      {
+        "name": "Identify and Modify Intermediate Assumptions and Core Beliefs",
+        "description": "Identify conditional rules, attitudes, assumptions, and core beliefs; evaluate their origins, current effects, evidence, and more adaptive alternatives.",
+        "states": [
+          "Surface-level restructuring is insufficient",
+          "Longstanding patterns are formulation-relevant"
+        ],
+        "confidence_score": 1.0
+      }
+    ]
+  },
+  {
+    "name": "Behavioral Interventions",
+    "description": "Actions that change avoidance, inactivity, skill deficits, and maintaining contingencies through planned behavior and experiential learning.",
+    "goal": {
+      "objective": "Increase adaptive engagement, test formulation-based predictions, strengthen skills, and reduce behavior that maintains problems.",
+      "success_levels": {
+        "ideal": "The patient collaboratively completes well-specified behavioral tasks, reviews outcomes, learns from discrepancies, and generalizes useful behavior.",
+        "acceptable": "The patient attempts tasks with partial completion or learning, and barriers are reviewed constructively.",
+        "unsuccessful": "Tasks are imposed, poorly specified, unsafe, unrelated to the formulation, or not reviewed for learning."
+      },
+      "reward_hint": "The patient completes or meaningfully attempts the task, compares prediction with outcome, and identifies transferable learning."
+    },
+    "states": [
+      "Avoidance, withdrawal, inactivity, or skill deficits maintain difficulties",
+      "A belief can be tested behaviorally",
+      "Practical problem solving is needed",
+      "The patient is ready and the intervention is clinically appropriate"
+    ],
+    "confidence_score": 1.0,
+    "micro_actions": [
+      {
+        "name": "Behavioral Activation",
+        "description": "Increase contact with meaningful, reinforcing, or mastery-related activities through graded, collaboratively selected action.",
+        "states": [
+          "Low activity, withdrawal, or loss of reinforcement is present",
+          "Activation fits the formulation"
+        ],
+        "confidence_score": 1.0
+      },
+      {
+        "name": "Activity Scheduling",
+        "description": "Plan specific activities by time and context, balance demands and restorative activities, and review mood, mastery, or learning afterward.",
+        "states": [
+          "Daily structure is weak",
+          "Planned activation is needed"
+        ],
+        "confidence_score": 1.0
+      },
+      {
+        "name": "Behavioral Experiments",
+        "description": "Define a testable prediction, design a safe and feasible experiment, specify observations, and compare expected with actual outcomes.",
+        "states": [
+          "A belief has a behavioral prediction",
+          "Experiential evidence is likely to be informative"
+        ],
+        "confidence_score": 1.0
+      },
+      {
+        "name": "Problem Solving",
+        "description": "Define the problem, generate options, evaluate consequences, select a feasible step, implement it, and review the result.",
+        "states": [
+          "A practical barrier is maintaining distress",
+          "The patient feels stuck or overwhelmed"
+        ],
+        "confidence_score": 1.0
+      },
+      {
+        "name": "Graded Exposure or Exposure With Response Prevention",
+        "description": "Develop a clinically appropriate hierarchy and conduct graded exposure, with response prevention when indicated, while monitoring learning, distress, and safety.",
+        "states": [
+          "Phobia-related avoidance or an appropriate exposure target is present",
+          "A qualified clinician has determined exposure is indicated"
+        ],
+        "confidence_score": 1.0,
+        "requires_human_oversight": true,
+        "autonomous_ai_delivery": false,
+        "safety_note": "Real-time exposure or exposure with response prevention requires clinical judgment and must not be autonomously delivered by an AI system. A qualified clinician should lead or directly supervise the intervention."
+      },
+      {
+        "name": "Skills Practice",
+        "description": "Teach, model, rehearse, and provide feedback on a formulation-relevant coping, communication, behavioral, or problem-solving skill.",
+        "states": [
+          "A skill deficit is identified",
+          "Practice can improve functioning or treatment implementation"
+        ],
+        "confidence_score": 1.0
+      }
+    ]
+  },
+  {
+    "name": "Cross-Cutting Delivery Competence and Clinical Oversight",
+    "description": "Competence is evaluated by how an intervention is selected and delivered, not only by its nominal label. The same technique may be high-quality CBT when it supports discovery and collaboration, or poor CBT when it becomes leading, persuasive, rigid, or unsafe.",
+    "goal": {
+      "objective": "Ensure every intervention is formulation-guided, collaborative, appropriately paced, competently executed, and within safe clinical boundaries.",
+      "success_levels": {
+        "ideal": "The intervention is selected from the evolving formulation, delivered non-leadingly, adapted to patient response, checked for understanding, and escalated to human clinical judgment when required.",
+        "acceptable": "The intervention is broadly appropriate but contains minor problems in timing, pacing, collaboration, or follow-through.",
+        "unsuccessful": "The intervention is chosen from symptoms alone, delivered persuasively or mechanically, ignores patient response, or crosses a boundary requiring clinician oversight."
+      },
+      "reward_hint": "The patient demonstrates authentic understanding or discovery, remains collaboratively engaged, and the intervention is adjusted when its effect differs from expectations."
+    },
+    "states": [
+      "Before selecting any intervention",
+      "Throughout intervention delivery",
+      "When the patient's response differs from expectations",
+      "When disagreement, confusion, distress, or disengagement emerges",
+      "Whenever an intervention requires clinical judgment or direct risk management"
+    ],
+    "confidence_score": 1.0,
+    "micro_actions": [
+      {
+        "name": "Select Interventions From the Current Case Formulation",
+        "description": "Choose the intervention based on the current links among triggers, thoughts, emotions, behaviors, physiological responses, beliefs, and maintaining factors rather than symptoms alone.",
+        "states": [
+          "Intervention selection",
+          "The formulation has changed",
+          "Progress has stalled"
+        ],
+        "confidence_score": 1.0
+      },
+      {
+        "name": "Facilitate Discovery Rather Than Persuasion",
+        "description": "Use questions, summaries, and evidence review to help the patient reach their own conclusions instead of pressing for therapist-preferred answers.",
+        "states": [
+          "Cognitive work",
+          "The patient agrees too quickly",
+          "Questions risk becoming leading"
+        ],
+        "confidence_score": 1.0
+      },
+      {
+        "name": "Adapt Pacing and Intensity",
+        "description": "Adjust complexity, emotional intensity, and task difficulty according to understanding, readiness, distress, and observed response.",
+        "states": [
+          "The patient is overwhelmed, confused, or disengaged",
+          "A task is too easy or too difficult"
+        ],
+        "confidence_score": 1.0
+      },
+      {
+        "name": "Monitor Immediate Effect and Correct Course",
+        "description": "Check understanding, emotional response, alliance impact, and learning during and after the intervention, then modify the approach when needed.",
+        "states": [
+          "During intervention delivery",
+          "After an unexpected or negative response"
+        ],
+        "confidence_score": 1.0
+      },
+      {
+        "name": "Escalate to Qualified Human Clinical Oversight",
+        "description": "Do not autonomously conduct interventions that require real-time clinical judgment, especially exposure-based procedures; limit AI use to clinician-approved support such as preparation, documentation, or review.",
+        "states": [
+          "Exposure or response prevention is considered",
+          "Safety or clinical complexity exceeds autonomous system boundaries"
+        ],
+        "confidence_score": 1.0,
+        "requires_human_oversight": true,
+        "autonomous_ai_delivery": false
+      }
+    ]
+  }
+]

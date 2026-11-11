@@ -1,0 +1,170 @@
+{
+  "macro_actions": [
+    {
+      "name": "Session-Structuring Actions",
+      "description": "Actions that organize each CBT session collaboratively, maintain focus, connect sessions over time, and translate discussion into between-session practice.",
+      "goal": {
+        "objective": "Create a predictable, collaborative, and clinically focused session structure.",
+        "success_levels": {
+          "ideal": "The agenda is jointly set, priority problems are addressed, progress and homework are reviewed, summaries support shared understanding, and the session ends with feedback and a clear new assignment.",
+          "acceptable": "Most structural elements are present, but one or more elements are brief, incomplete, or insufficiently collaborative.",
+          "unsuccessful": "The session is unstructured, therapist-dominated, disconnected from prior work, or ends without shared understanding and an actionable plan."
+        },
+        "reward_hint": "The patient can state the agenda and key conclusions, participates in prioritization, and understands the agreed homework."
+      },
+      "states": [
+        "At the beginning of each session",
+        "When several problems compete for attention",
+        "During transitions between topics",
+        "At the end of each session",
+        "When continuity across sessions is weak"
+      ],
+      "included_actions": [
+        "Collaborative Agenda Setting",
+        "Mood and Symptom Check-In",
+        "Review Previous Homework",
+        "Prioritize One or Two Target Problems",
+        "Provide Periodic Summaries",
+        "Elicit End-of-Session Feedback",
+        "Assign New Homework"
+      ],
+      "confidence_score": 1.0
+    },
+    {
+      "name": "Therapeutic Relationship Actions",
+      "description": "Actions that strengthen collaboration, understanding, trust, and repair while preserving the patient's active role in treatment.",
+      "goal": {
+        "objective": "Maintain a collaborative therapeutic alliance characterized by agreement on goals, agreement on tasks, and a workable interpersonal bond.",
+        "success_levels": {
+          "ideal": "The patient feels heard and respected, openly contributes to goals and tasks, understands the work, provides feedback, and alliance strains are identified and repaired.",
+          "acceptable": "The relationship is adequate for treatment, but feedback, collaboration, or repair is inconsistent.",
+          "unsuccessful": "The patient feels misunderstood, pressured, excluded, or persistently disengaged, and relational strain is not addressed."
+        },
+        "reward_hint": "The patient communicates openly, corrects misunderstandings, collaborates on decisions, and remains engaged after disagreements."
+      },
+      "states": [
+        "Throughout all sessions",
+        "When distress or hesitation is expressed",
+        "When goals or tasks are negotiated",
+        "When misunderstanding, disagreement, withdrawal, or disengagement appears"
+      ],
+      "included_actions": [
+        "Reflective Listening",
+        "Empathic Validation",
+        "Clarification",
+        "Collaborative Goal Negotiation",
+        "Check Patient Understanding",
+        "Elicit Patient Feedback",
+        "Repair Alliance Ruptures"
+      ],
+      "confidence_score": 1.0
+    },
+    {
+      "name": "Cognitive Interventions",
+      "description": "Actions that help the patient identify and evaluate automatic thoughts, distortions, assumptions, and core beliefs through guided discovery rather than persuasion.",
+      "goal": {
+        "objective": "Increase cognitive awareness and flexibility while supporting the patient's own evidence-based conclusions.",
+        "success_levels": {
+          "ideal": "The patient identifies relevant cognitions, evaluates them with balanced evidence, develops credible alternatives, and can apply the process with increasing independence.",
+          "acceptable": "The patient participates and reaches partial insight or a tentative alternative with therapist support.",
+          "unsuccessful": "The intervention is leading, argumentative, disconnected from the formulation, or produces superficial agreement without patient discovery."
+        },
+        "reward_hint": "The patient generates links, evidence, and balanced alternatives in their own words and reports a meaningful shift in conviction or emotion."
+      },
+      "states": [
+        "A triggering situation and emotional response have been identified",
+        "Automatic thoughts or beliefs appear linked to distress or behavior",
+        "A recurrent pattern requires deeper belief work",
+        "The patient is sufficiently regulated and willing to examine the cognition"
+      ],
+      "included_actions": [
+        "Guided Socratic Questioning",
+        "Identify Automatic Thoughts",
+        "Identify Cognitive Distortions",
+        "Examine Evidence For and Against Beliefs",
+        "Generate Balanced Alternative Interpretations",
+        "Decatastrophizing",
+        "Downward-Arrow Technique",
+        "Identify and Modify Intermediate Assumptions and Core Beliefs"
+      ],
+      "confidence_score": 1.0,
+      "action_constraints": [
+        {
+          "action": "Guided Socratic Questioning",
+          "delivery_requirement": "Questions should facilitate patient discovery rather than steer the patient toward a predetermined answer."
+        }
+      ]
+    },
+    {
+      "name": "Behavioral Interventions",
+      "description": "Actions that change avoidance, inactivity, skill deficits, and maintaining contingencies through planned behavior and experiential learning.",
+      "goal": {
+        "objective": "Increase adaptive engagement, test formulation-based predictions, strengthen skills, and reduce behavior that maintains problems.",
+        "success_levels": {
+          "ideal": "The patient collaboratively completes well-specified behavioral tasks, reviews outcomes, learns from discrepancies, and generalizes useful behavior.",
+          "acceptable": "The patient attempts tasks with partial completion or learning, and barriers are reviewed constructively.",
+          "unsuccessful": "Tasks are imposed, poorly specified, unsafe, unrelated to the formulation, or not reviewed for learning."
+        },
+        "reward_hint": "The patient completes or meaningfully attempts the task, compares prediction with outcome, and identifies transferable learning."
+      },
+      "states": [
+        "Avoidance, withdrawal, inactivity, or skill deficits maintain difficulties",
+        "A belief can be tested behaviorally",
+        "Practical problem solving is needed",
+        "The patient is ready and the intervention is clinically appropriate"
+      ],
+      "included_actions": [
+        "Behavioral Activation",
+        "Activity Scheduling",
+        "Behavioral Experiments",
+        "Problem Solving",
+        "Graded Exposure or Exposure With Response Prevention",
+        "Skills Practice"
+      ],
+      "confidence_score": 1.0,
+      "action_constraints": [
+        {
+          "action": "Graded Exposure or Exposure With Response Prevention",
+          "requires_human_oversight": true,
+          "autonomous_ai_delivery": false,
+          "safety_note": "Real-time exposure or exposure with response prevention requires clinical judgment and must not be autonomously delivered by an AI system. A qualified clinician should lead or directly supervise the intervention."
+        }
+      ]
+    },
+    {
+      "name": "Cross-Cutting Delivery Competence and Clinical Oversight",
+      "description": "Competence is evaluated by how an intervention is selected and delivered, not only by its nominal label. The same technique may be high-quality CBT when it supports discovery and collaboration, or poor CBT when it becomes leading, persuasive, rigid, or unsafe.",
+      "goal": {
+        "objective": "Ensure every intervention is formulation-guided, collaborative, appropriately paced, competently executed, and within safe clinical boundaries.",
+        "success_levels": {
+          "ideal": "The intervention is selected from the evolving formulation, delivered non-leadingly, adapted to patient response, checked for understanding, and escalated to human clinical judgment when required.",
+          "acceptable": "The intervention is broadly appropriate but contains minor problems in timing, pacing, collaboration, or follow-through.",
+          "unsuccessful": "The intervention is chosen from symptoms alone, delivered persuasively or mechanically, ignores patient response, or crosses a boundary requiring clinician oversight."
+        },
+        "reward_hint": "The patient demonstrates authentic understanding or discovery, remains collaboratively engaged, and the intervention is adjusted when its effect differs from expectations."
+      },
+      "states": [
+        "Before selecting any intervention",
+        "Throughout intervention delivery",
+        "When the patient's response differs from expectations",
+        "When disagreement, confusion, distress, or disengagement emerges",
+        "Whenever an intervention requires clinical judgment or direct risk management"
+      ],
+      "included_actions": [
+        "Select Interventions From the Current Case Formulation",
+        "Facilitate Discovery Rather Than Persuasion",
+        "Adapt Pacing and Intensity",
+        "Monitor Immediate Effect and Correct Course",
+        "Escalate to Qualified Human Clinical Oversight"
+      ],
+      "confidence_score": 1.0,
+      "action_constraints": [
+        {
+          "action": "Escalate to Qualified Human Clinical Oversight",
+          "requires_human_oversight": true,
+          "autonomous_ai_delivery": false
+        }
+      ]
+    }
+  ]
+}

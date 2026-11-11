@@ -203,26 +203,49 @@ def test_topas_runtime_is_bundled_without_external_code_imports():
         assert "import baselines" not in source
 
 
-def test_bundled_topas_sources_match_the_simulation_runtime():
+def test_bundled_ablation_sources_match_the_latest_simulation_runtime():
     project_root = Path(__file__).resolve().parents[3]
-    simulation_dir = project_root / "simulations"
+    simulation_dir = project_root / "sim_latest_version"
     if not (simulation_dir / "topa_agent.py").is_file():
-        pytest.skip("The source simulation package is not present for comparison.")
+        pytest.skip("The latest simulation package is not present for comparison.")
     server_dir = Path(__file__).resolve().parents[1] / "server"
-    relative_files = (
-        Path("topa_agent.py"),
-        Path("topa_models.py"),
-        Path("topa_components/macro_actions.json"),
-        Path("topa_components/micro_actions.json"),
-        Path("topa_components/conversation_states.json"),
+    runtime_files = (
+        "agents.py",
+        "config.py",
+        "llm.py",
+        "topa_agent.py",
+        "topa_models.py",
+        "memory_policy.py",
+        "micro_checkpoint_paths.py",
+        "session.py",
     )
-    for relative in relative_files:
-        bundled_root = (
-            server_dir / "assets"
-            if relative.parts[0] == "topa_components"
-            else server_dir / "model_runtime"
-        )
-        assert (bundled_root / relative).read_bytes() == (simulation_dir / relative).read_bytes()
+    for name in runtime_files:
+        assert (server_dir / "ablation_runtime" / name).read_bytes() == (
+            simulation_dir / name
+        ).read_bytes()
+
+    component_sources = {
+        "expert": simulation_dir / "expert_components",
+        "chatgpt": project_root / "components" / "chat_gpt_components",
+        "no_rl": simulation_dir / "topa_components",
+    }
+    for bundle_name, source in component_sources.items():
+        for name in ("macro_actions.json", "micro_actions.json", "conversation_states.json"):
+            assert (
+                server_dir / "assets" / "ablation_components" / bundle_name / name
+            ).read_bytes() == (source / name).read_bytes()
+
+    topa_source = project_root / "TOPA-main" / "topa"
+    bundled_topa = server_dir / "topa"
+    for relative in (
+        Path("utils.py"),
+        Path("annotation/annotators/base.py"),
+        Path("annotation/annotators/knowledge_graph.py"),
+        Path("annotation/prompts/knowledge_graph_prompt.py"),
+    ):
+        assert (bundled_topa / relative).read_bytes().rstrip(b"\r\n") == (
+            topa_source / relative
+        ).read_bytes().rstrip(b"\r\n")
 
 
 def test_leaked_speaker_markers_are_generation_boundaries():

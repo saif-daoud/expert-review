@@ -67,10 +67,19 @@ def login(
     return {"Authorization": f"Bearer {resumed.json()['token']}"}
 
 
-def wait_for_panel(client: TestClient, headers: dict[str, str], study_id: str, panel_id: str) -> dict:
+def wait_for_panel(
+    client: TestClient,
+    headers: dict[str, str],
+    study_id: str,
+    panel_id: str,
+    evaluation_track: str = "baselines",
+) -> dict:
     deadline = time.monotonic() + 4
     while time.monotonic() < deadline:
-        study = client.get(f"/api/studies/{study_id}", headers=headers).json()["study"]
+        study = client.get(
+            f"/api/studies/{study_id}?evaluation_track={evaluation_track}",
+            headers=headers,
+        ).json()["study"]
         panel = next(item for item in study["panels"] if item["id"] == panel_id)
         if panel["job"]["status"] in {"completed", "failed"}:
             return panel
@@ -817,3 +826,222 @@ def test_legacy_five_profile_environment_is_expanded(monkeypatch):
     )
     assert len(profiles._selected_group(1)) == 20
     assert len(profiles._selected_group(2)) == 20
+
+
+def test_ablation_track_is_default_focus_without_changing_original_panels(monkeypatch, tmp_path):
+    with load_client(monkeypatch, tmp_path) as client:
+        headers = login(client, "EXPERT-5834", "ablation-track@example.org")
+        profile = client.get("/api/profiles", headers=headers).json()["profiles"][0]
+
+        ablations = client.post(
+            "/api/studies",
+            headers=headers,
+            json={"profile_id": profile["id"], "evaluation_track": "ablations"},
+        )
+        assert ablations.status_code == 200
+        ablation_study = ablations.json()["study"]
+        assert ablation_study["evaluation_track"] == "ablations"
+        assert ablation_study["total_sessions"] == 5
+        assert [panel["label"] for panel in ablation_study["panels"]] == [
+            "Therapist A",
+            "Therapist B",
+            "Therapist C",
+            "Therapist D",
+            "Therapist E",
+        ]
+        assert "method_key" not in str(ablation_study)
+
+        originals = client.post(
+            "/api/studies",
+            headers=headers,
+            json={"profile_id": profile["id"], "evaluation_track": "baselines"},
+        )
+        assert originals.status_code == 200
+        original_study = originals.json()["study"]
+        assert original_study["id"] == ablation_study["id"]
+        assert original_study["evaluation_track"] == "baselines"
+        assert original_study["total_sessions"] == 6
+        assert {panel["id"] for panel in original_study["panels"]}.isdisjoint(
+            {panel["id"] for panel in ablation_study["panels"]}
+        )
+
+        app_module = sys.modules["server.app"]
+        with app_module.database() as connection:
+            rows = connection.execute(
+                """
+                SELECT evaluation_track, method_key FROM study_panels
+                WHERE study_id = ? ORDER BY evaluation_track, display_order
+                """,
+                (ablation_study["id"],),
+            ).fetchall()
+        methods_by_track = {
+            track: {row["method_key"] for row in rows if row["evaluation_track"] == track}
+            for track in ("ablations", "baselines")
+        }
+        assert methods_by_track["ablations"] == set(app_module.ABLATION_METHOD_KEYS)
+        assert methods_by_track["baselines"] == set(app_module.METHOD_KEYS)
+
+        reread = client.get(
+            f"/api/studies/{ablation_study['id']}?evaluation_track=ablations",
+            headers=headers,
+        )
+        assert reread.status_code == 200
+        assert reread.json()["study"]["total_sessions"] == 5
+
+
+def test_existing_four_panel_ablation_study_is_extended_without_reassignment(
+    monkeypatch, tmp_path
+):
+    with load_client(monkeypatch, tmp_path) as client:
+        headers = login(client, "EXPERT-5834", "ablation-upgrade@example.org")
+        profile = client.get("/api/profiles", headers=headers).json()["profiles"][0]
+        study = client.post(
+            "/api/studies",
+            headers=headers,
+            json={"profile_id": profile["id"], "evaluation_track": "ablations"},
+        ).json()["study"]
+        app_module = sys.modules["server.app"]
+
+        with app_module.database() as connection:
+            old_rows = connection.execute(
+                """
+                SELECT id, method_key FROM study_panels
+                WHERE study_id = ? AND evaluation_track = 'ablations'
+                AND method_key != 'topas_full'
+                ORDER BY display_order
+                """,
+                (study["id"],),
+            ).fetchall()
+            old_ids = {row["id"] for row in old_rows}
+            connection.execute(
+                """
+                DELETE FROM study_panels
+                WHERE study_id = ? AND evaluation_track = 'ablations'
+                AND method_key = 'topas_full'
+                """,
+                (study["id"],),
+            )
+            for index, row in enumerate(old_rows):
+                connection.execute(
+                    "UPDATE study_panels SET display_order = ? WHERE id = ?",
+                    (index, row["id"]),
+                )
+            connection.commit()
+
+        app_module.initialize_database()
+        profile_after_migration = client.get("/api/profiles", headers=headers)
+        assert profile_after_migration.status_code == 200
+        migrated_study = profile_after_migration.json()["profiles"][0]["study"]
+        assert migrated_study["total_sessions"] == 5
+
+        upgraded = client.post(
+            "/api/studies",
+            headers=headers,
+            json={"profile_id": profile["id"], "evaluation_track": "ablations"},
+        )
+        assert upgraded.status_code == 200
+        panels = upgraded.json()["study"]["panels"]
+        assert len(panels) == 5
+        assert {panel["id"] for panel in panels[:4]} == old_ids
+        assert panels[-1]["label"] == "Therapist E"
+
+        with app_module.database() as connection:
+            added = connection.execute(
+                """
+                SELECT method_key, display_order FROM study_panels
+                WHERE study_id = ? AND evaluation_track = 'ablations'
+                ORDER BY display_order DESC LIMIT 1
+                """,
+                (study["id"],),
+            ).fetchone()
+        assert added["method_key"] == "topas_full"
+        assert added["display_order"] == 4
+
+
+def test_ablation_and_original_sequences_are_independent(monkeypatch, tmp_path):
+    with load_client(monkeypatch, tmp_path) as client:
+        headers = login(client, "EXPERT-5834", "independent-tracks@example.org")
+        profile = client.get("/api/profiles", headers=headers).json()["profiles"][0]
+        ablations = client.post(
+            "/api/studies",
+            headers=headers,
+            json={"profile_id": profile["id"], "evaluation_track": "ablations"},
+        ).json()["study"]
+        originals = client.post(
+            "/api/studies",
+            headers=headers,
+            json={"profile_id": profile["id"], "evaluation_track": "baselines"},
+        ).json()["study"]
+
+        # The first original method can start even while the separate ablation
+        # sequence is still at its first method.
+        original_panel = originals["panels"][0]
+        started = client.post(
+            f"/api/studies/{originals['id']}/panels/{original_panel['id']}/start",
+            headers=headers,
+            json={"client_request_id": "original-track-start"},
+        )
+        assert started.status_code == 200
+        original_panel = wait_for_panel(
+            client, headers, originals["id"], original_panel["id"]
+        )
+        assert original_panel["messages"][0]["role"] == "therapist"
+
+        ablation_view = client.get(
+            f"/api/studies/{ablations['id']}?evaluation_track=ablations",
+            headers=headers,
+        ).json()["study"]
+        assert ablation_view["completed_sessions"] == 0
+        assert ablation_view["current_panel_id"] == ablations["panels"][0]["id"]
+
+
+def test_completing_five_ablations_unlocks_the_next_patient(monkeypatch, tmp_path):
+    with load_client(monkeypatch, tmp_path) as client:
+        headers = login(client, "EXPERT-5834", "complete-ablations@example.org")
+        profile = client.get("/api/profiles", headers=headers).json()["profiles"][0]
+        study = client.post(
+            "/api/studies",
+            headers=headers,
+            json={"profile_id": profile["id"], "evaluation_track": "ablations"},
+        ).json()["study"]
+        scores = {key: 4 for key in sys.modules["server.app"].CTRS_KEYS}
+
+        for index in range(5):
+            panel = next(
+                item for item in study["panels"] if item["id"] == study["current_panel_id"]
+            )
+            started = client.post(
+                f"/api/studies/{study['id']}/panels/{panel['id']}/start",
+                headers=headers,
+                json={"client_request_id": f"ablation-start-{index}"},
+            )
+            assert started.status_code == 200
+            panel = wait_for_panel(
+                client,
+                headers,
+                study["id"],
+                panel["id"],
+                evaluation_track="ablations",
+            )
+            ended = client.post(
+                f"/api/studies/{study['id']}/panels/{panel['id']}/end",
+                headers=headers,
+                json={"client_request_id": f"ablation-end-{index}"},
+            )
+            assert ended.status_code == 200
+            rated = client.post(
+                f"/api/studies/{study['id']}/panels/{panel['id']}/rating",
+                headers=headers,
+                json={"scores": scores, "comments": f"Ablation {index + 1}"},
+            )
+            assert rated.status_code == 200
+            study = rated.json()["study"]
+            assert study["completed_sessions"] == index + 1
+
+        assert study["evaluation_track"] == "ablations"
+        assert study["status"] == "finished"
+        assert study["total_sessions"] == 5
+        profile_payload = client.get("/api/profiles", headers=headers).json()
+        assert profile_payload["profiles"][0]["study"]["completed_sessions"] == 5
+        assert profile_payload["can_request_next"] is True
+        assert client.post("/api/assignments/next", headers=headers).status_code == 200

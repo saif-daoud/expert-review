@@ -1474,6 +1474,8 @@ def build_generator_from_env(prefix: str, max_new_tokens: int | None | object = 
         trust_remote_code=hf_trust_remote_code,
         max_input_length=int(os.environ.get(f"{prefix}_HF_MAX_INPUT_LENGTH", "512")),
         prompt_style=os.environ.get(f"{prefix}_HF_PROMPT_STYLE", "chat"),
+        temperature=float(os.environ.get(f"{prefix}_TEMPERATURE", "0.7")),
+        top_p=float(os.environ.get(f"{prefix}_TOP_P", "0.95")),
         **model_kwargs,
     )
     gen.max_new_tokens = resolved_max_new_tokens

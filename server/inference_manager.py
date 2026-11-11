@@ -29,6 +29,11 @@ RUNTIME_BY_METHOD = {
     "prompting": "base",
     "proact": "base",
     "topas": "base",
+    "topas_expert_components": "base",
+    "topas_chatgpt_components": "base",
+    "topas_no_rl": "base",
+    "topas_no_conv_state": "base",
+    "topas_full": "base",
     "archer": "archer",
     "aria": "aria",
     "sweet_rl": "sweet_rl",
@@ -379,7 +384,11 @@ class InferenceManager:
                 FROM inference_jobs AS j
                 JOIN study_panels AS p ON p.id = j.panel_id
                 JOIN studies AS s ON s.id = p.study_id
-                WHERE j.status = 'queued' AND s.status = 'active'
+                WHERE j.status = 'queued'
+                  AND p.ended_at IS NULL
+                  AND NOT EXISTS (
+                      SELECT 1 FROM panel_ratings AS r WHERE r.panel_id = p.id
+                  )
                 ORDER BY j.sequence
                 LIMIT 1
                 """
@@ -405,7 +414,7 @@ class InferenceManager:
     def _static_response(self, method: str, history: list[dict[str, str]]) -> str:
         if not history:
             return "Hello, it is good to meet you. What brought you in today?"
-        if method == "topas":
+        if method.startswith("topas"):
             return (
                 "Thank you for sharing that. What thoughts or feelings tend to come up most strongly "
                 "when this happens?"
@@ -615,9 +624,45 @@ class InferenceManager:
             connection.execute("UPDATE studies SET updated_at = ? WHERE id = ?", (now, job["study_id"]))
             connection.commit()
 
+    def _requeue_interrupted_job(self, job_id: str) -> bool:
+        """Return an in-flight job to the queue after a transient database failure."""
+        for attempt in range(5):
+            try:
+                with _database(self.database_path) as connection:
+                    connection.execute("BEGIN IMMEDIATE")
+                    connection.execute(
+                        "UPDATE inference_jobs SET status = 'queued', started_at = NULL "
+                        "WHERE id = ? AND status = 'running'",
+                        (job_id,),
+                    )
+                    connection.commit()
+                self._wake.set()
+                return True
+            except sqlite3.Error:
+                if attempt == 4:
+                    LOGGER.exception(
+                        "Could not requeue inference job %s after a database failure.",
+                        job_id,
+                    )
+                    return False
+                if self._stop.wait(timeout=1):
+                    return False
+        return False
+
+    def _wait_after_queue_error(self) -> None:
+        self._wake.clear()
+        self._wake.wait(timeout=1)
+
     def _run(self) -> None:
         while not self._stop.is_set():
-            job = self._claim_next_job()
+            try:
+                job = self._claim_next_job()
+            except Exception:
+                # A transient SQLite lock must not permanently kill the sole
+                # inference thread while the HTTP API continues to look alive.
+                LOGGER.exception("Inference queue could not claim its next job; retrying.")
+                self._wait_after_queue_error()
+                continue
             if job is None:
                 self._wake.clear()
                 self._wake.wait(timeout=1)
@@ -632,8 +677,29 @@ class InferenceManager:
                 automatic_end = self._complete_job(job, utterance)
                 if automatic_end:
                     self.release_panel(job["panel_id"])
+            except sqlite3.Error:
+                # Database access can fail temporarily while a backup or
+                # maintenance command holds a write lock. Preserve the user's
+                # request and retry it instead of marking the model as failed.
+                LOGGER.exception(
+                    "Database error while processing inference job %s; requeueing.",
+                    job["id"],
+                )
+                self.release_panel(job["panel_id"])
+                self._requeue_interrupted_job(job["id"])
+                self._wait_after_queue_error()
             except Exception as exc:  # A failed model must not stop later queued jobs.
-                self._fail_job(job, exc)
+                try:
+                    self._fail_job(job, exc)
+                except Exception:
+                    # Even recording a model failure may encounter the same
+                    # transient database problem. Do not let that secondary
+                    # error terminate the queue thread.
+                    LOGGER.exception(
+                        "Could not record failure for inference job %s; requeueing.",
+                        job["id"],
+                    )
+                    self._requeue_interrupted_job(job["id"])
                 self.release_panel(job["panel_id"])
             finally:
                 with self._workers_lock:
@@ -642,13 +708,21 @@ class InferenceManager:
                         self._last_activity[job["panel_id"]] = time.monotonic()
 
     def health(self) -> dict[str, Any]:
-        with _database(self.database_path) as connection:
-            queued = connection.execute(
-                "SELECT COUNT(*) FROM inference_jobs WHERE status = 'queued'"
-            ).fetchone()[0]
-            running = connection.execute(
-                "SELECT COUNT(*) FROM inference_jobs WHERE status = 'running'"
-            ).fetchone()[0]
+        database_ok = True
+        database_error = None
+        try:
+            with _database(self.database_path) as connection:
+                queued = connection.execute(
+                    "SELECT COUNT(*) FROM inference_jobs WHERE status = 'queued'"
+                ).fetchone()[0]
+                running = connection.execute(
+                    "SELECT COUNT(*) FROM inference_jobs WHERE status = 'running'"
+                ).fetchone()[0]
+        except sqlite3.Error as exc:
+            database_ok = False
+            database_error = str(exc)[:500]
+            queued = -1
+            running = -1
         with self._workers_lock:
             loaded_workers = sum(worker.running for worker in self.workers.values())
             gpu_assignments = {
@@ -661,6 +735,7 @@ class InferenceManager:
                     )
                 )
             }
+        worker_thread_alive = bool(self._thread is not None and self._thread.is_alive())
         return {
             "mode": self.mode,
             "queue_depth": int(queued),
@@ -668,4 +743,7 @@ class InferenceManager:
             "loaded_workers": loaded_workers,
             "gpu_assignments": gpu_assignments,
             "idle_timeout_seconds": self.idle_timeout_seconds,
+            "worker_thread_alive": worker_thread_alive,
+            "database_ok": database_ok,
+            "database_error": database_error,
         }

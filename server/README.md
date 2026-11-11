@@ -3,8 +3,10 @@
 Place this directory anywhere writable by your user, such as `~/clean-env/server`. It contains its own model-loading
 code, policies, prompt, and PatientAct profile data; it does not import Python code from `simulations/` or `baselines/`.
 The large trained checkpoint paths are configured in `.env`. FastAPI and all model workers run without root access.
-All experts use one shared access code and are tracked by email. Each new expert receives one patient; after all six
-sessions and ratings are complete, the expert can request another. An unused offer is released, while the first CTRS
+All experts use one shared access code and are tracked by email. Each new expert receives one patient. The local
+ablation-study interface presents five TOPAS variants by default and keeps the six original therapist methods in
+a separate read-only reference set. After the five focused sessions and ratings are complete, the expert can request
+another patient. An unused offer is released, while the first CTRS
 rating permanently claims that patient for the expert. Display numbering is account-relative and always begins at
 Patient 1. No participant code is entered on the website. First-time users complete a professional profile. Sessions
 run sequentially, and the API stores an 11-item CTRS rating before unlocking the next therapist.
@@ -38,7 +40,11 @@ the allocator checks live free memory with `nvidia-smi` and tries GPUs `0,1,2,3`
 method-specific `STUDY_GPU_MIN_FREE_MB_*` threshold and retries the next GPU after a CUDA out-of-memory load failure.
 If all four GPUs are unavailable, the website asks the expert to retry in five minutes. A loaded worker is also
 unloaded after 60 seconds without another patient response (`STUDY_MODEL_IDLE_TIMEOUT_SECONDS=60`). TOPAS uses the
-bundled standalone implementation and the artifact paths configured in `.env`.
+bundled standalone implementation and the artifact paths configured in `.env`. The ablation runtime is copied from
+`sim_latest_version` and includes expert components, ChatGPT components, prompt-only TOPAS, TOPAS without
+conversation states, and full TOPAS with conversation state plus retrieved knowledge-graph memory. No
+patient-simulator model is loaded because the expert supplies the patient turns. Full TOPAS performs its online KG
+updates through the configured GPT-4.1 endpoint, so its API endpoint/key must also be present in `.env`.
 
 Useful checks:
 

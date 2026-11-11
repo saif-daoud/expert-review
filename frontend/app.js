@@ -9,7 +9,7 @@ const storageKeys = {
   token: "cbt-live/token",
   email: "cbt-live/email"
 };
-const incompletePatientWarning = "Your input for this patient is incomplete. Please finish the remaining simulator baseline(s) and submit their ratings before leaving.";
+const incompletePatientWarning = "Your input for this patient is incomplete. Please finish the remaining ablation therapist session(s) and submit their ratings before leaving.";
 const state = {
   token: sessionStorage.getItem(storageKeys.token) || "",
   email: sessionStorage.getItem(storageKeys.email) || "",
@@ -17,6 +17,8 @@ const state = {
   canRequestNext: false,
   allPatientsAssigned: false,
   study: null,
+  evaluationTrack: "ablations",
+  ablationIncomplete: false,
   view: "login",
   pollTimer: null,
   toastTimer: null,
@@ -57,6 +59,8 @@ const el = {
   patientName: document.getElementById("patient-name"),
   patientCondition: document.getElementById("patient-condition"),
   patientProgress: document.getElementById("patient-progress"),
+  evaluationTrackNote: document.getElementById("evaluation-track-note"),
+  evaluationTrackButtons: Array.from(document.querySelectorAll("[data-evaluation-track]")),
   patientSummary: document.getElementById("patient-summary"),
   patientContext: document.getElementById("patient-context"),
   patientHistory: document.getElementById("patient-history"),
@@ -162,6 +166,8 @@ function signOut() {
   state.canRequestNext = false;
   state.allPatientsAssigned = false;
   state.study = null;
+  state.evaluationTrack = "ablations";
+  state.ablationIncomplete = false;
   state.ratingPanelId = null;
   state.pendingActions.clear();
   sessionStorage.removeItem(storageKeys.token);
@@ -181,11 +187,7 @@ function releaseUnusedPatientOffer() {
 }
 
 function patientIsIncomplete() {
-  return Boolean(
-    state.study
-    && state.study.status !== "finished"
-    && Number(state.study.completed_sessions || 0) < Number(state.study.total_sessions || 6)
-  );
+  return Boolean(state.study && state.ablationIncomplete);
 }
 
 function confirmLeavingIncompletePatient() {
@@ -215,6 +217,22 @@ function currentPanel() {
   return state.study?.panels.find(panel => panel.id === state.study.current_panel_id) || null;
 }
 
+function trackTitle(track = state.evaluationTrack) {
+  return track === "ablations" ? "Ablation study" : "Original methods";
+}
+
+function adoptStudy(study) {
+  state.study = study;
+  state.evaluationTrack = study?.evaluation_track || state.evaluationTrack;
+  if (state.evaluationTrack === "ablations") {
+    state.ablationIncomplete = Boolean(
+      study
+      && study.status !== "finished"
+      && Number(study.completed_sessions || 0) < Number(study.total_sessions || 5)
+    );
+  }
+}
+
 function sessionPosition(panel) {
   return Number(panel?.display_order ?? state.study?.completed_sessions ?? 0) + 1;
 }
@@ -235,7 +253,7 @@ function renderProfiles() {
     button.type = "button";
     button.className = "patient-card";
     const completed = profile.study?.completed_sessions || 0;
-    const total = profile.study?.total_sessions || 6;
+    const total = profile.study?.total_sessions || 5;
     const statusText = profile.study?.status === "finished"
       ? "Completed"
       : profile.study
@@ -292,11 +310,12 @@ async function requestNextPatient() {
 async function openPatient(profile) {
   if (patientIsIncomplete() && state.study.profile?.id !== profile.id && !confirmLeavingIncompletePatient()) return;
   try {
+    state.evaluationTrack = "ablations";
     const payload = await api("/api/studies", {
       method: "POST",
-      body: JSON.stringify({ profile_id: profile.id })
+      body: JSON.stringify({ profile_id: profile.id, evaluation_track: state.evaluationTrack })
     });
-    state.study = payload.study;
+    adoptStudy(payload.study);
     state.ratingPanelId = null;
     showPatientProfile();
   } catch (error) {
@@ -332,9 +351,17 @@ function showPatientProfile() {
   populatePatientProfile();
   const study = state.study;
   const panel = currentPanel();
+  el.evaluationTrackButtons.forEach(button => {
+    const active = button.dataset.evaluationTrack === state.evaluationTrack;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+  el.evaluationTrackNote.textContent = state.evaluationTrack === "ablations"
+    ? "The ablation study is the current evaluation focus."
+    : "These original methods remain available for comparison; your main focus is the ablation study.";
   el.patientProgress.textContent = `${study.completed_sessions} of ${study.total_sessions} sessions rated`;
   if (study.status === "finished" || !panel) {
-    el.patientNextNote.textContent = "All therapist sessions and CTRS evaluations are complete for this patient.";
+    el.patientNextNote.textContent = `${trackTitle()} sessions and CTRS evaluations are complete for this patient.`;
     el.beginSession.classList.add("hidden");
   } else {
     const position = sessionPosition(panel);
@@ -349,6 +376,31 @@ function showPatientProfile() {
     }
   }
   showView("patient");
+}
+
+async function switchEvaluationTrack(track) {
+  if (!state.study || track === state.evaluationTrack) return;
+  if (track === "baselines") {
+    showToast("The current evaluation focuses on the ablation methods. Please complete the ablation sessions now.");
+    return;
+  }
+  el.evaluationTrackButtons.forEach(button => { button.disabled = true; });
+  try {
+    const payload = await api("/api/studies", {
+      method: "POST",
+      body: JSON.stringify({
+        profile_id: state.study.profile.id,
+        evaluation_track: track
+      })
+    });
+    adoptStudy(payload.study);
+    state.ratingPanelId = null;
+    showPatientProfile();
+  } catch (error) {
+    handleAuthenticatedError(error);
+  } finally {
+    el.evaluationTrackButtons.forEach(button => { button.disabled = false; });
+  }
 }
 
 function openProfileDialog() {
@@ -522,7 +574,7 @@ function showSession() {
   if (!panel) return showPatientProfile();
   if (panel.status === "rating") return showRating();
   const position = sessionPosition(panel);
-  el.sessionProgress.textContent = `Session ${position} of ${state.study.total_sessions}`;
+  el.sessionProgress.textContent = `${trackTitle()} - session ${position} of ${state.study.total_sessions}`;
   el.sessionTherapist.textContent = panel.label;
   el.endSession.disabled = !panel.can_end || state.pendingActions.has(panel.id);
   updatePanel(panel);
@@ -544,8 +596,8 @@ function schedulePoll() {
 async function refreshStudy() {
   if (!state.study) return;
   try {
-    const payload = await api(`/api/studies/${state.study.id}`);
-    state.study = payload.study;
+    const payload = await api(`/api/studies/${state.study.id}?evaluation_track=${encodeURIComponent(state.evaluationTrack)}`);
+    adoptStudy(payload.study);
     if (state.view === "session") showSession();
     else if (state.view === "patient") showPatientProfile();
     schedulePoll();
@@ -627,7 +679,7 @@ async function endCurrentSession() {
       method: "POST",
       body: JSON.stringify({ client_request_id: requestId() })
     });
-    state.study = payload.study;
+    adoptStudy(payload.study);
     showRating();
   } catch (error) {
     handleAuthenticatedError(error);
@@ -648,7 +700,7 @@ async function leaveCurrentSession(nextView = showPatientProfile) {
       method: "POST",
       body: JSON.stringify({ client_request_id: requestId() })
     });
-    state.study = payload.study;
+    adoptStudy(payload.study);
     nextView();
   } catch (error) {
     handleAuthenticatedError(error);
@@ -742,7 +794,7 @@ function showRating() {
   const panel = currentPanel();
   if (!panel || panel.status !== "rating") return showPatientProfile();
   const position = sessionPosition(panel);
-  el.ratingProgress.textContent = `Session ${position} of ${state.study.total_sessions} - CTRS evaluation`;
+  el.ratingProgress.textContent = `${trackTitle()} - session ${position} of ${state.study.total_sessions} - CTRS evaluation`;
   el.ratingTitle.textContent = `Score ${panel.label}`;
   const automaticEndMessages = {
     therapist_farewell: "The session ended after the therapist said goodbye.",
@@ -784,9 +836,13 @@ async function submitRating(event) {
       method: "POST",
       body: JSON.stringify({ scores, comments: el.ratingComments.value })
     });
-    state.study = payload.study;
+    adoptStudy(payload.study);
     state.ratingPanelId = null;
-    showToast(state.study.status === "finished" ? "All six evaluations are complete." : "CTRS evaluation saved.");
+    showToast(
+      state.study.status === "finished"
+        ? `${trackTitle()} evaluations are complete.`
+        : "CTRS evaluation saved."
+    );
     showPatientProfile();
   } catch (error) {
     handleAuthenticatedError(error);
@@ -864,6 +920,9 @@ el.home.addEventListener("click", event => {
   else loadProfiles();
 });
 el.beginSession.addEventListener("click", showCurrentStage);
+el.evaluationTrackButtons.forEach(button => {
+  button.addEventListener("click", () => switchEvaluationTrack(button.dataset.evaluationTrack));
+});
 el.nextPatientButton.addEventListener("click", requestNextPatient);
 el.profileButton.addEventListener("click", openProfileDialog);
 el.ratingProfileButton.addEventListener("click", openProfileDialog);

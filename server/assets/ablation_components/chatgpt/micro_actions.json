@@ -1,0 +1,197 @@
+[
+  {
+    "name": "Therapeutic Alliance and Agenda Setting",
+    "description": "Establishes rapport, clarifies roles, and collaboratively defines the session focus and expectations.",
+    "goal": {
+      "objective": "Create a safe, collaborative foundation and a clear agenda for the CBT session.",
+      "success_levels": {
+        "ideal": "Patient feels understood, engaged, and agrees on a clear, shared agenda.",
+        "acceptable": "Basic rapport is established and a tentative agenda is set.",
+        "unsuccessful": "Patient feels misunderstood, disengaged, or the session lacks direction."
+      },
+      "reward_hint": "Patient expresses comfort, willingness to engage, and agreement on session goals."
+    },
+    "states": [
+      "Session start with unclear goals",
+      "Patient expresses uncertainty about therapy process",
+      "Low initial trust or engagement"
+    ],
+    "confidence_score": 0.93,
+    "micro_actions": [
+      {
+        "name": "Warm Greeting and Normalization",
+        "description": "Therapist offers a welcoming greeting and normalizes the therapy experience.",
+        "states": [
+          "First session or session opening",
+          "Patient appears anxious or guarded"
+        ],
+        "confidence_score": 0.95
+      },
+      {
+        "name": "Collaborative Agenda Proposal",
+        "description": "Therapist suggests possible topics and invites the patient to prioritize them.",
+        "states": [
+          "Multiple concerns expressed",
+          "Unstructured or drifting conversation early in session"
+        ],
+        "confidence_score": 0.92
+      }
+    ]
+  },
+  {
+    "name": "Problem Exploration and Emotional Validation",
+    "description": "Elicits detailed descriptions of the patient’s difficulties while validating emotional experiences.",
+    "goal": {
+      "objective": "Develop a shared understanding of the patient’s problems and emotional context.",
+      "success_levels": {
+        "ideal": "Patient openly shares experiences and feels emotionally validated.",
+        "acceptable": "Key problems are identified with moderate emotional engagement.",
+        "unsuccessful": "Patient remains vague, defensive, or emotionally disconnected."
+      },
+      "reward_hint": "Patient provides concrete examples and acknowledges feeling understood."
+    },
+    "states": [
+      "Patient reports distress or symptoms",
+      "Problems are vague or poorly specified",
+      "Emotional intensity is rising"
+    ],
+    "confidence_score": 0.94,
+    "micro_actions": [
+      {
+        "name": "Open-Ended Inquiry",
+        "description": "Therapist asks open questions to encourage detailed sharing.",
+        "states": [
+          "Patient gives brief or surface-level responses",
+          "Need to expand on a reported issue"
+        ],
+        "confidence_score": 0.94
+      },
+      {
+        "name": "Empathic Reflection",
+        "description": "Therapist reflects feelings and meanings to validate the patient’s experience.",
+        "states": [
+          "Patient expresses strong emotions",
+          "Patient seeks understanding or reassurance"
+        ],
+        "confidence_score": 0.96
+      }
+    ]
+  },
+  {
+    "name": "Cognitive Assessment and Case Formulation",
+    "description": "Identifies automatic thoughts, beliefs, and cognitive patterns linked to emotions and behaviors.",
+    "goal": {
+      "objective": "Build a shared CBT formulation connecting thoughts, emotions, and behaviors.",
+      "success_levels": {
+        "ideal": "Patient recognizes and articulates key automatic thoughts and patterns.",
+        "acceptable": "Some cognitive links are identified with therapist support.",
+        "unsuccessful": "Patient cannot identify or engage with cognitive aspects."
+      },
+      "reward_hint": "Patient verbalizes thought–emotion–behavior connections."
+    },
+    "states": [
+      "Repeated maladaptive behaviors",
+      "Emotional reactions lack clear explanation",
+      "Patient reports negative self-talk"
+    ],
+    "confidence_score": 0.91,
+    "micro_actions": [
+      {
+        "name": "Thought Elicitation",
+        "description": "Therapist asks targeted questions to uncover automatic thoughts.",
+        "states": [
+          "Strong emotional reaction described",
+          "Behavioral avoidance or rumination noted"
+        ],
+        "confidence_score": 0.92
+      },
+      {
+        "name": "Summarizing Cognitive Links",
+        "description": "Therapist summarizes how thoughts, feelings, and behaviors interact.",
+        "states": [
+          "Multiple elements discussed",
+          "Patient appears confused about patterns"
+        ],
+        "confidence_score": 0.9
+      }
+    ]
+  },
+  {
+    "name": "Cognitive Restructuring and Behavioral Experimentation",
+    "description": "Guides the patient to evaluate and modify maladaptive thoughts and test new behaviors.",
+    "goal": {
+      "objective": "Reduce maladaptive thinking and promote more adaptive beliefs and behaviors.",
+      "success_levels": {
+        "ideal": "Patient generates balanced thoughts and commits to adaptive actions.",
+        "acceptable": "Patient questions maladaptive thoughts with therapist guidance.",
+        "unsuccessful": "Patient rigidly maintains maladaptive beliefs."
+      },
+      "reward_hint": "Patient expresses alternative perspectives or willingness to try new behaviors."
+    },
+    "states": [
+      "Identified cognitive distortions",
+      "Avoidance or safety behaviors present",
+      "Patient seeks solutions or change"
+    ],
+    "confidence_score": 0.92,
+    "micro_actions": [
+      {
+        "name": "Socratic Questioning",
+        "description": "Therapist uses guided questions to examine evidence for and against thoughts.",
+        "states": [
+          "Rigid or catastrophic thinking",
+          "Patient expresses certainty in negative beliefs"
+        ],
+        "confidence_score": 0.94
+      },
+      {
+        "name": "Behavioral Experiment Planning",
+        "description": "Therapist collaborates to design small experiments to test beliefs.",
+        "states": [
+          "Patient open to change",
+          "Opportunities for real-world testing identified"
+        ],
+        "confidence_score": 0.91
+      }
+    ]
+  },
+  {
+    "name": "Consolidation, Homework, and Session Closure",
+    "description": "Reinforces learning, assigns between-session tasks, and closes the session collaboratively.",
+    "goal": {
+      "objective": "Ensure learning is consolidated and translated into between-session practice.",
+      "success_levels": {
+        "ideal": "Patient clearly summarizes insights and commits to homework.",
+        "acceptable": "Homework is assigned with basic understanding.",
+        "unsuccessful": "Patient leaves unclear or unmotivated to practice."
+      },
+      "reward_hint": "Patient accurately summarizes session and agrees to specific next steps."
+    },
+    "states": [
+      "Session time nearing end",
+      "Key insights have emerged",
+      "Preparation for between-session work needed"
+    ],
+    "confidence_score": 0.95,
+    "micro_actions": [
+      {
+        "name": "Session Summarization",
+        "description": "Therapist reviews main points and invites patient feedback.",
+        "states": [
+          "End of session",
+          "Multiple insights discussed"
+        ],
+        "confidence_score": 0.95
+      },
+      {
+        "name": "Homework Assignment",
+        "description": "Therapist collaboratively defines concrete, achievable homework tasks.",
+        "states": [
+          "Patient shows readiness to apply skills",
+          "Behavioral or cognitive practice identified"
+        ],
+        "confidence_score": 0.96
+      }
+    ]
+  }
+]

@@ -74,6 +74,32 @@ EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 DATABASE_LOCK = threading.RLock()
 METHOD_KEYS = ["prompting", "proact", "archer", "aria", "sweet_rl", "topas"]
 PANEL_LABELS = ["Therapist A", "Therapist B", "Therapist C", "Therapist D", "Therapist E", "Therapist F"]
+ABLATION_METHOD_KEYS = [
+    "topas_expert_components",
+    "topas_chatgpt_components",
+    "topas_no_rl",
+    "topas_no_conv_state",
+    "topas_full",
+]
+EVALUATION_TRACKS = {
+    "baselines": {
+        "methods": METHOD_KEYS,
+        "labels": PANEL_LABELS,
+        "internal_label_prefix": "",
+    },
+    "ablations": {
+        "methods": ABLATION_METHOD_KEYS,
+        "labels": [
+            "Therapist A",
+            "Therapist B",
+            "Therapist C",
+            "Therapist D",
+            "Therapist E",
+        ],
+        "internal_label_prefix": "Ablation ",
+    },
+}
+PRIMARY_EVALUATION_TRACK = "ablations"
 CTRS_KEYS = (
     "agenda",
     "feedback",
@@ -119,6 +145,7 @@ class ParticipantProfileRequest(BaseModel):
 
 class StudyRequest(BaseModel):
     profile_id: str
+    evaluation_track: str = "baselines"
 
 
 class MessageRequest(BaseModel):
@@ -351,7 +378,7 @@ def allocate_patient_offer(connection: sqlite3.Connection, participant_code: str
     if not _all_assigned_patients_finished(connection, participant_code):
         raise HTTPException(
             status_code=409,
-            detail="Finish all six therapist sessions and ratings for your current patient first.",
+            detail="Finish all ablation therapist sessions and ratings for your current patient first.",
         )
     participant = connection.execute(
         "SELECT email, name FROM participants WHERE participant_code = ?", (participant_code,)
@@ -541,6 +568,7 @@ def initialize_database() -> None:
                 label TEXT NOT NULL,
                 method_key TEXT NOT NULL,
                 display_order INTEGER NOT NULL,
+                evaluation_track TEXT NOT NULL DEFAULT 'baselines',
                 ended_at TEXT,
                 termination_reason TEXT,
                 FOREIGN KEY (study_id) REFERENCES studies(id) ON DELETE CASCADE,
@@ -631,22 +659,35 @@ def initialize_database() -> None:
             connection.execute("ALTER TABLE study_panels ADD COLUMN ended_at TEXT")
         if "termination_reason" not in panel_columns:
             connection.execute("ALTER TABLE study_panels ADD COLUMN termination_reason TEXT")
-        # Studies completed by the earlier parallel-chat UI have no CTRS
-        # ratings. Reopen them so the new sequential evaluation can resume.
-        connection.execute(
+        if "evaluation_track" not in panel_columns:
+            connection.execute(
+                "ALTER TABLE study_panels "
+                "ADD COLUMN evaluation_track TEXT NOT NULL DEFAULT 'baselines'"
+            )
+        # Extend studies created by an earlier ablation definition before the
+        # profile list is serialized. This makes the new method visible even
+        # when a returning expert has not reopened the patient yet.
+        for study in connection.execute(
             """
-            UPDATE studies
-            SET status = 'active', finished_at = NULL, updated_at = ?
-            WHERE status = 'finished'
-              AND EXISTS (
-                  SELECT 1
-                  FROM study_panels AS p
-                  LEFT JOIN panel_ratings AS r ON r.panel_id = p.id
-                  WHERE p.study_id = studies.id AND r.id IS NULL
-              )
+            SELECT DISTINCT s.id, s.participant_code, s.profile_id
+            FROM studies AS s
+            JOIN study_panels AS p ON p.study_id = s.id
+            WHERE p.evaluation_track = ?
             """,
-            (utc_now(),),
-        )
+            (PRIMARY_EVALUATION_TRACK,),
+        ).fetchall():
+            _ensure_track_panels(
+                connection,
+                study["id"],
+                study["participant_code"],
+                study["profile_id"],
+                PRIMARY_EVALUATION_TRACK,
+            )
+        # Recompute status from the primary evaluation track. Existing data is
+        # baseline data; once ablation panels are added, ablations become the
+        # required track while the original sessions remain intact and usable.
+        for existing_study in connection.execute("SELECT id FROM studies").fetchall():
+            _sync_study_status(connection, existing_study["id"])
         # Existing studies predate the one-patient-at-a-time allocator. Make
         # them visible without changing any transcript or rating data.
         for study in connection.execute(
@@ -732,24 +773,94 @@ def _latest_job(connection: sqlite3.Connection, panel_id: str) -> sqlite3.Row | 
     ).fetchone()
 
 
-def _current_panel(connection: sqlite3.Connection, study_id: str) -> sqlite3.Row | None:
+def _validate_evaluation_track(value: str) -> str:
+    track = value.strip().lower()
+    if track not in EVALUATION_TRACKS:
+        raise HTTPException(status_code=422, detail="Unknown evaluation track.")
+    return track
+
+
+def _panel_track(panel: sqlite3.Row) -> str:
+    return str(panel["evaluation_track"] or "baselines")
+
+
+def _track_definition(track: str) -> dict:
+    return EVALUATION_TRACKS[_validate_evaluation_track(track)]
+
+
+def _track_counts(
+    connection: sqlite3.Connection, study_id: str, track: str
+) -> tuple[int, int]:
+    row = connection.execute(
+        """
+        SELECT COUNT(p.id) AS total, COUNT(r.id) AS completed
+        FROM study_panels AS p
+        LEFT JOIN panel_ratings AS r ON r.panel_id = p.id
+        WHERE p.study_id = ? AND p.evaluation_track = ?
+        """,
+        (study_id, track),
+    ).fetchone()
+    return int(row["completed"]), int(row["total"])
+
+
+def _primary_track(connection: sqlite3.Connection, study_id: str) -> str:
+    has_ablations = connection.execute(
+        """
+        SELECT 1 FROM study_panels
+        WHERE study_id = ? AND evaluation_track = ? LIMIT 1
+        """,
+        (study_id, PRIMARY_EVALUATION_TRACK),
+    ).fetchone()
+    return PRIMARY_EVALUATION_TRACK if has_ablations else "baselines"
+
+
+def _track_is_complete(connection: sqlite3.Connection, study_id: str, track: str) -> bool:
+    completed, total = _track_counts(connection, study_id, track)
+    return total > 0 and completed == total
+
+
+def _sync_study_status(connection: sqlite3.Connection, study_id: str) -> None:
+    track = _primary_track(connection, study_id)
+    complete = _track_is_complete(connection, study_id, track)
+    now = utc_now()
+    if complete:
+        connection.execute(
+            """
+            UPDATE studies
+            SET status = 'finished', finished_at = COALESCE(finished_at, ?)
+            WHERE id = ?
+            """,
+            (now, study_id),
+        )
+    else:
+        connection.execute(
+            """
+            UPDATE studies SET status = 'active', finished_at = NULL WHERE id = ?
+            """,
+            (study_id,),
+        )
+
+
+def _current_panel(
+    connection: sqlite3.Connection, study_id: str, track: str = "baselines"
+) -> sqlite3.Row | None:
     return connection.execute(
         """
         SELECT p.*
         FROM study_panels AS p
         LEFT JOIN panel_ratings AS r ON r.panel_id = p.id
-        WHERE p.study_id = ? AND r.id IS NULL
+        WHERE p.study_id = ? AND p.evaluation_track = ? AND r.id IS NULL
         ORDER BY p.display_order
         LIMIT 1
         """,
-        (study_id,),
+        (study_id, track),
     ).fetchone()
 
 
 def _require_current_panel(
     connection: sqlite3.Connection, study: sqlite3.Row, panel: sqlite3.Row
 ) -> None:
-    current = _current_panel(connection, study["id"])
+    current = _current_panel(connection, study["id"], _panel_track(panel))
     if current is None or current["id"] != panel["id"]:
         raise HTTPException(
             status_code=409,
@@ -804,27 +915,28 @@ def serialize_job(connection: sqlite3.Connection, job: sqlite3.Row | None) -> di
     return result
 
 
-def serialize_study(connection: sqlite3.Connection, study: sqlite3.Row) -> dict:
+def serialize_study(
+    connection: sqlite3.Connection,
+    study: sqlite3.Row,
+    evaluation_track: str = "baselines",
+) -> dict:
+    evaluation_track = _validate_evaluation_track(evaluation_track)
     profile = PROFILES[study["profile_id"]]
     assignment = assignment_for_profile(connection, study["participant_code"], study["profile_id"])
     display_number = int(assignment["display_order"]) if assignment is not None else profile["display_number"]
-    current = _current_panel(connection, study["id"])
-    current_panel_id = current["id"] if current is not None and study["status"] == "active" else None
-    completed_sessions = int(
-        connection.execute(
-            """
-            SELECT COUNT(*)
-            FROM panel_ratings AS r
-            JOIN study_panels AS p ON p.id = r.panel_id
-            WHERE p.study_id = ?
-            """,
-            (study["id"],),
-        ).fetchone()[0]
+    completed_sessions, total_sessions = _track_counts(
+        connection, study["id"], evaluation_track
     )
+    track_finished = total_sessions > 0 and completed_sessions == total_sessions
+    current = _current_panel(connection, study["id"], evaluation_track)
+    current_panel_id = current["id"] if current is not None and not track_finished else None
     panels = []
     for panel in connection.execute(
-        "SELECT * FROM study_panels WHERE study_id = ? ORDER BY display_order",
-        (study["id"],),
+        """
+        SELECT * FROM study_panels
+        WHERE study_id = ? AND evaluation_track = ? ORDER BY display_order
+        """,
+        (study["id"], evaluation_track),
     ).fetchall():
         messages = [
             dict(row)
@@ -851,7 +963,7 @@ def serialize_study(connection: sqlite3.Connection, study: sqlite3.Row) -> dict:
         panels.append(
             {
                 "id": panel["id"],
-                "label": panel["label"],
+                "label": _track_definition(evaluation_track)["labels"][panel["display_order"]],
                 "display_order": panel["display_order"],
                 "status": panel_status,
                 "is_current": is_current,
@@ -870,14 +982,14 @@ def serialize_study(connection: sqlite3.Connection, study: sqlite3.Row) -> dict:
                     else None
                 ),
                 "can_start": (
-                    study["status"] == "active"
+                    not track_finished
                     and is_current
                     and not panel["ended_at"]
                     and not messages
                     and not pending
                 ),
                 "can_send": (
-                    study["status"] == "active"
+                    not track_finished
                     and is_current
                     and not panel["ended_at"]
                     and bool(messages)
@@ -885,24 +997,25 @@ def serialize_study(connection: sqlite3.Connection, study: sqlite3.Row) -> dict:
                     and not pending
                 ),
                 "can_end": (
-                    study["status"] == "active"
+                    not track_finished
                     and is_current
                     and not panel["ended_at"]
                     and bool(messages)
                     and messages[-1]["role"] == "therapist"
                     and not pending
                 ),
-                "can_rate": study["status"] == "active" and is_current and bool(panel["ended_at"]),
+                "can_rate": not track_finished and is_current and bool(panel["ended_at"]),
             }
         )
     return {
         "id": study["id"],
-        "status": study["status"],
+        "status": "finished" if track_finished else "active",
+        "evaluation_track": evaluation_track,
         "profile": public_profile(profile, display_number=display_number),
         "panels": panels,
         "current_panel_id": current_panel_id,
         "completed_sessions": completed_sessions,
-        "total_sessions": len(PANEL_LABELS),
+        "total_sessions": total_sessions,
         "max_session_turns": MAX_SESSION_TURNS,
         "created_at": study["created_at"],
         "updated_at": study["updated_at"],
@@ -910,15 +1023,96 @@ def serialize_study(connection: sqlite3.Connection, study: sqlite3.Row) -> dict:
     }
 
 
-def _method_order(participant_code: str, profile_id: str) -> list[str]:
+def _method_order(
+    participant_code: str, profile_id: str, evaluation_track: str = "baselines"
+) -> list[str]:
+    definition = _track_definition(evaluation_track)
     digest = hmac.new(
         TOKEN_SECRET.encode("utf-8"),
-        f"{participant_code}|{profile_id}|panel-order".encode("utf-8"),
+        f"{participant_code}|{profile_id}|{evaluation_track}|panel-order".encode("utf-8"),
         hashlib.sha256,
     ).digest()
-    methods = METHOD_KEYS.copy()
+    methods = list(definition["methods"])
     random.Random(int.from_bytes(digest, "big")).shuffle(methods)
     return methods
+
+
+def _ensure_track_panels(
+    connection: sqlite3.Connection,
+    study_id: str,
+    participant_code: str,
+    profile_id: str,
+    evaluation_track: str,
+) -> None:
+    definition = _track_definition(evaluation_track)
+    existing_rows = connection.execute(
+        """
+        SELECT method_key, display_order FROM study_panels
+        WHERE study_id = ? AND evaluation_track = ?
+        ORDER BY display_order
+        """,
+        (study_id, evaluation_track),
+    ).fetchall()
+    if existing_rows:
+        expected_methods = set(definition["methods"])
+        existing_methods = [str(row["method_key"]) for row in existing_rows]
+        if len(existing_methods) != len(set(existing_methods)) or not set(
+            existing_methods
+        ).issubset(expected_methods):
+            raise RuntimeError(
+                f"Study {study_id} has an incompatible {evaluation_track} panel set."
+            )
+        missing_methods = [
+            method for method in definition["methods"] if method not in existing_methods
+        ]
+        # Preserve every existing blinded panel and rating when a new method is
+        # added to a track. New panels are appended, so historical labels and
+        # method assignments never change.
+        next_order = max(int(row["display_order"]) for row in existing_rows) + 1
+        prefix = str(definition["internal_label_prefix"])
+        for method in missing_methods:
+            public_label = definition["labels"][next_order]
+            connection.execute(
+                """
+                INSERT INTO study_panels(
+                    id, study_id, label, method_key, display_order, evaluation_track
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    str(uuid.uuid4()),
+                    study_id,
+                    f"{prefix}{public_label}",
+                    method,
+                    next_order,
+                    evaluation_track,
+                ),
+            )
+            next_order += 1
+        _sync_study_status(connection, study_id)
+        return
+    prefix = str(definition["internal_label_prefix"])
+    for index, (public_label, method) in enumerate(
+        zip(
+            definition["labels"],
+            _method_order(participant_code, profile_id, evaluation_track),
+        )
+    ):
+        connection.execute(
+            """
+            INSERT INTO study_panels(
+                id, study_id, label, method_key, display_order, evaluation_track
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                str(uuid.uuid4()),
+                study_id,
+                f"{prefix}{public_label}",
+                method,
+                index,
+                evaluation_track,
+            ),
+        )
+    _sync_study_status(connection, study_id)
 
 
 def _validate_request_id(value: str) -> str:
@@ -1009,7 +1203,9 @@ async def security_headers(request: Request, call_next):
 
 @app.get("/api/health")
 def health() -> dict:
-    return {"status": "ok", "inference": INFERENCE_MANAGER.health()}
+    inference = INFERENCE_MANAGER.health()
+    operational = bool(inference["worker_thread_alive"] and inference["database_ok"])
+    return {"status": "ok" if operational else "degraded", "inference": inference}
 
 
 @app.post("/api/auth/login")
@@ -1142,25 +1338,20 @@ def list_profiles(participant_code: str = Depends(require_participant)) -> dict:
 
 
 def profiles_payload(connection: sqlite3.Connection, participant_code: str) -> dict:
-    existing = {
-        row["profile_id"]: {
-            "id": row["id"],
-            "status": row["status"],
-            "completed_sessions": int(row["completed_sessions"]),
-            "total_sessions": len(PANEL_LABELS),
+    existing = {}
+    for study in connection.execute(
+        "SELECT * FROM studies WHERE participant_code = ?",
+        (participant_code,),
+    ).fetchall():
+        track = _primary_track(connection, study["id"])
+        completed, total = _track_counts(connection, study["id"], track)
+        existing[study["profile_id"]] = {
+            "id": study["id"],
+            "status": "finished" if total > 0 and completed == total else "active",
+            "completed_sessions": completed,
+            "total_sessions": total,
+            "evaluation_track": track,
         }
-        for row in connection.execute(
-            """
-            SELECT s.id, s.profile_id, s.status, COUNT(r.id) AS completed_sessions
-            FROM studies AS s
-            LEFT JOIN study_panels AS p ON p.study_id = s.id
-            LEFT JOIN panel_ratings AS r ON r.panel_id = p.id
-            WHERE s.participant_code = ?
-            GROUP BY s.id, s.profile_id, s.status
-            """,
-            (participant_code,),
-        ).fetchall()
-    }
     assignments = connection.execute(
         """
         SELECT profile_id, display_order, status FROM patient_assignments
@@ -1204,7 +1395,7 @@ def request_next_patient(participant_code: str = Depends(require_participant)) -
             connection.rollback()
             raise HTTPException(
                 status_code=409,
-                detail="Finish all six therapist sessions and ratings for your current patient first.",
+                detail="Finish all ablation therapist sessions and ratings for your current patient first.",
             )
         allocate_patient_offer(connection, participant_code)
         result = profiles_payload(connection, participant_code)
@@ -1224,6 +1415,7 @@ def release_current_patient(participant_code: str = Depends(require_participant)
 @app.post("/api/studies")
 def create_study(payload: StudyRequest, participant_code: str = Depends(require_participant)) -> dict:
     profile_id = payload.profile_id.strip()
+    evaluation_track = _validate_evaluation_track(payload.evaluation_track)
     now = utc_now()
     with DATABASE_LOCK, database() as connection:
         connection.execute("BEGIN IMMEDIATE")
@@ -1244,24 +1436,31 @@ def create_study(payload: StudyRequest, participant_code: str = Depends(require_
                 """,
                 (study_id, participant_code, profile_id, now, now),
             )
-            for index, (label, method) in enumerate(zip(PANEL_LABELS, _method_order(participant_code, profile_id))):
-                connection.execute(
-                    """
-                    INSERT INTO study_panels(id, study_id, label, method_key, display_order)
-                    VALUES (?, ?, ?, ?, ?)
-                    """,
-                    (str(uuid.uuid4()), study_id, label, method, index),
-                )
             existing = connection.execute("SELECT * FROM studies WHERE id = ?", (study_id,)).fetchone()
+        _ensure_track_panels(
+            connection,
+            existing["id"],
+            participant_code,
+            profile_id,
+            evaluation_track,
+        )
+        existing = connection.execute(
+            "SELECT * FROM studies WHERE id = ?", (existing["id"],)
+        ).fetchone()
         connection.commit()
-        return {"study": serialize_study(connection, existing)}
+        return {"study": serialize_study(connection, existing, evaluation_track)}
 
 
 @app.get("/api/studies/{study_id}")
-def read_study(study_id: str, participant_code: str = Depends(require_participant)) -> dict:
+def read_study(
+    study_id: str,
+    evaluation_track: str = "baselines",
+    participant_code: str = Depends(require_participant),
+) -> dict:
+    evaluation_track = _validate_evaluation_track(evaluation_track)
     with database() as connection:
         study = get_study(connection, study_id, participant_code)
-        return {"study": serialize_study(connection, study)}
+        return {"study": serialize_study(connection, study, evaluation_track)}
 
 
 @app.post("/api/studies/{study_id}/panels/{panel_id}/start")
@@ -1275,7 +1474,7 @@ def start_panel(
     with DATABASE_LOCK, database() as connection:
         connection.execute("BEGIN IMMEDIATE")
         study, panel = get_panel(connection, study_id, panel_id, participant_code)
-        if study["status"] != "active":
+        if _track_is_complete(connection, study_id, _panel_track(panel)):
             connection.rollback()
             raise HTTPException(status_code=409, detail="This patient study is finished.")
         _require_current_panel(connection, study, panel)
@@ -1366,7 +1565,7 @@ def send_message(
         if duplicate is not None:
             connection.commit()
             return {"job": serialize_job(connection, duplicate)}
-        if study["status"] != "active":
+        if _track_is_complete(connection, study_id, _panel_track(panel)):
             connection.rollback()
             raise HTTPException(status_code=409, detail="This patient study is finished.")
         _require_current_panel(connection, study, panel)
@@ -1454,7 +1653,7 @@ def retry_panel(
     with DATABASE_LOCK, database() as connection:
         connection.execute("BEGIN IMMEDIATE")
         study, panel = get_panel(connection, study_id, panel_id, participant_code)
-        if study["status"] != "active":
+        if _track_is_complete(connection, study_id, _panel_track(panel)):
             connection.rollback()
             raise HTTPException(status_code=409, detail="This patient study is finished.")
         _require_current_panel(connection, study, panel)
@@ -1502,7 +1701,7 @@ def leave_panel(
         INFERENCE_MANAGER.pause_panel(panel_id)
     with database() as connection:
         study = get_study(connection, study_id, participant_code)
-        result = serialize_study(connection, study)
+        result = serialize_study(connection, study, _panel_track(panel))
     return {"study": result}
 
 
@@ -1518,7 +1717,7 @@ def end_panel(
     with DATABASE_LOCK, database() as connection:
         connection.execute("BEGIN IMMEDIATE")
         study, panel = get_panel(connection, study_id, panel_id, participant_code)
-        if study["status"] != "active":
+        if _track_is_complete(connection, study_id, _panel_track(panel)):
             connection.rollback()
             raise HTTPException(status_code=409, detail="This patient study is finished.")
         _require_current_panel(connection, study, panel)
@@ -1544,7 +1743,7 @@ def end_panel(
             connection.execute("UPDATE studies SET updated_at = ? WHERE id = ?", (now, study_id))
         connection.commit()
         study = get_study(connection, study_id, participant_code)
-        result = serialize_study(connection, study)
+        result = serialize_study(connection, study, _panel_track(panel))
     # No inference is needed while the expert completes CTRS. Terminating the
     # panel-owned subprocess releases the model and its CUDA allocations.
     INFERENCE_MANAGER.release_panel(panel_id)
@@ -1569,8 +1768,11 @@ def rate_panel(
         if existing is not None:
             connection.commit()
             study = get_study(connection, study_id, participant_code)
-            return {"study": serialize_study(connection, study), "total_score": existing["total_score"]}
-        if study["status"] != "active":
+            return {
+                "study": serialize_study(connection, study, _panel_track(panel)),
+                "total_score": existing["total_score"],
+            }
+        if _track_is_complete(connection, study_id, _panel_track(panel)):
             connection.rollback()
             raise HTTPException(status_code=409, detail="This patient study is finished.")
         _require_current_panel(connection, study, panel)
@@ -1602,27 +1804,11 @@ def rate_panel(
             """,
             (now, now, participant_code, study["profile_id"]),
         )
-        completed = int(
-            connection.execute(
-                """
-                SELECT COUNT(*)
-                FROM panel_ratings AS r
-                JOIN study_panels AS p ON p.id = r.panel_id
-                WHERE p.study_id = ?
-                """,
-                (study_id,),
-            ).fetchone()[0]
-        )
-        if completed == len(PANEL_LABELS):
-            connection.execute(
-                "UPDATE studies SET status = 'finished', finished_at = ?, updated_at = ? WHERE id = ?",
-                (now, now, study_id),
-            )
-        else:
-            connection.execute("UPDATE studies SET updated_at = ? WHERE id = ?", (now, study_id))
+        connection.execute("UPDATE studies SET updated_at = ? WHERE id = ?", (now, study_id))
+        _sync_study_status(connection, study_id)
         connection.commit()
         study = get_study(connection, study_id, participant_code)
-        result = serialize_study(connection, study)
+        result = serialize_study(connection, study, _panel_track(panel))
     # Idempotent fallback for sessions ended before an API restart or by an
     # older frontend that did not trigger cleanup at the end step.
     INFERENCE_MANAGER.release_panel(panel_id)
@@ -1630,8 +1816,12 @@ def rate_panel(
 
 
 @app.post("/api/studies/{study_id}/finish")
-def finish_study(study_id: str, participant_code: str = Depends(require_participant)) -> dict:
-    now = utc_now()
+def finish_study(
+    study_id: str,
+    evaluation_track: str = "baselines",
+    participant_code: str = Depends(require_participant),
+) -> dict:
+    evaluation_track = _validate_evaluation_track(evaluation_track)
     with DATABASE_LOCK, database() as connection:
         connection.execute("BEGIN IMMEDIATE")
         study = get_study(connection, study_id, participant_code)
@@ -1640,24 +1830,20 @@ def finish_study(study_id: str, participant_code: str = Depends(require_particip
             SELECT COUNT(*)
             FROM study_panels AS p
             LEFT JOIN panel_ratings AS r ON r.panel_id = p.id
-            WHERE p.study_id = ? AND r.id IS NULL
+            WHERE p.study_id = ? AND p.evaluation_track = ? AND r.id IS NULL
             """,
-            (study_id,),
+            (study_id, evaluation_track),
         ).fetchone()[0]
         if remaining:
             connection.rollback()
             raise HTTPException(
                 status_code=409,
-                detail="Complete and rate all six therapist sessions before finishing this patient.",
+                detail="Complete and rate every therapist session in this evaluation set first.",
             )
-        if study["status"] == "active":
-            connection.execute(
-                "UPDATE studies SET status = 'finished', finished_at = ?, updated_at = ? WHERE id = ?",
-                (now, now, study_id),
-            )
+        _sync_study_status(connection, study_id)
         connection.commit()
         study = get_study(connection, study_id, participant_code)
-        result = serialize_study(connection, study)
+        result = serialize_study(connection, study, evaluation_track)
     return {"study": result}
 
 
