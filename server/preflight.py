@@ -70,7 +70,7 @@ EXPERT_MICRO_POLICY_DIR = configured_path(
 )
 CHAT_CONV_STATE_DIR = configured_path(
     "STUDY_TOPAS_CHAT_CONV_STATE_DIR",
-    ABLATION_RUNS_DIR / "sft_conv_state_acts_L22_Chat",
+    ABLATION_RUNS_DIR / "sft_conv_state_acts_L22_CHATGPT",
 )
 CHAT_MACRO_POLICY_DIR = configured_path(
     "STUDY_TOPAS_CHAT_MACRO_POLICY_DIR", ABLATION_RUNS_DIR / "chat_O_22"
@@ -83,11 +83,11 @@ NO_CONV_RUNS_DIR = configured_path(
 )
 NO_CONV_MACRO_POLICY_DIR = configured_path(
     "STUDY_TOPAS_NO_CONV_MACRO_POLICY_DIR",
-    NO_CONV_RUNS_DIR / "iql_policy_over_options_acts_L22",
+    NO_CONV_RUNS_DIR / "TOPAS_Options_wo_cvstates22",
 )
 NO_CONV_MICRO_POLICY_DIR = configured_path(
     "STUDY_TOPAS_NO_CONV_MICRO_POLICY_DIR",
-    NO_CONV_RUNS_DIR / "iql_micro_policies_acts_L22",
+    NO_CONV_RUNS_DIR / "TOPAS_Primitive_wo_cvstates22",
 )
 NO_CONV_COMPONENTS_PATH = configured_path(
     "STUDY_TOPAS_NO_CONV_COMPONENTS_PATH",
@@ -106,7 +106,7 @@ FULL_MICRO_POLICY_DIR = configured_path(
 )
 FULL_CONV_STATE_DIR = configured_path(
     "STUDY_TOPAS_FULL_CONV_STATE_DIR",
-    MODEL_ROOT / "topas" / "full" / "runs" / "sft_conv_state_acts_L22",
+    FULL_RUNS_DIR / "sft_conv_state_acts_L22",
 )
 FULL_MEMORY_RETRIEVER_DIR = configured_path(
     "STUDY_TOPAS_FULL_MEMORY_RETRIEVER_DIR",

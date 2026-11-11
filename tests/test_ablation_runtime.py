@@ -73,8 +73,11 @@ def test_no_conversation_state_ablation_uses_saved_checkpoint_action_space(
     monkeypatch.setenv("STUDY_TOPAS_NO_CONV_RUNS_DIR", str(tmp_path / "no-conv"))
     method_worker.configure_runtime("base", "topas_no_conv_state")
 
-    macro = (tmp_path / "no-conv" / "iql_policy_over_options_acts_L22").resolve()
+    macro = (tmp_path / "no-conv" / "TOPAS_Options_wo_cvstates22").resolve()
     assert os.environ["SIMULATION_MACRO_POLICY_DIR"] == str(macro)
+    assert os.environ["SIMULATION_MICRO_POLICY_DIR"] == str(
+        (tmp_path / "no-conv" / "TOPAS_Primitive_wo_cvstates22").resolve()
+    )
     assert os.environ["TOPA_COMPONENTS_DIR"] == str(macro / "used_action_space.json")
     assert os.environ["SIMULATION_POLICY_CONV_STATE_ONLY"] == "auto"
     assert os.environ["SIMULATION_USE_MEMORY"] == "false"

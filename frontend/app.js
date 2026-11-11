@@ -59,8 +59,6 @@ const el = {
   patientName: document.getElementById("patient-name"),
   patientCondition: document.getElementById("patient-condition"),
   patientProgress: document.getElementById("patient-progress"),
-  evaluationTrackNote: document.getElementById("evaluation-track-note"),
-  evaluationTrackButtons: Array.from(document.querySelectorAll("[data-evaluation-track]")),
   patientSummary: document.getElementById("patient-summary"),
   patientContext: document.getElementById("patient-context"),
   patientHistory: document.getElementById("patient-history"),
@@ -217,8 +215,8 @@ function currentPanel() {
   return state.study?.panels.find(panel => panel.id === state.study.current_panel_id) || null;
 }
 
-function trackTitle(track = state.evaluationTrack) {
-  return track === "ablations" ? "Ablation study" : "Original methods";
+function trackTitle() {
+  return "Ablation study";
 }
 
 function adoptStudy(study) {
@@ -351,14 +349,6 @@ function showPatientProfile() {
   populatePatientProfile();
   const study = state.study;
   const panel = currentPanel();
-  el.evaluationTrackButtons.forEach(button => {
-    const active = button.dataset.evaluationTrack === state.evaluationTrack;
-    button.classList.toggle("active", active);
-    button.setAttribute("aria-pressed", String(active));
-  });
-  el.evaluationTrackNote.textContent = state.evaluationTrack === "ablations"
-    ? "The ablation study is the current evaluation focus."
-    : "These original methods remain available for comparison; your main focus is the ablation study.";
   el.patientProgress.textContent = `${study.completed_sessions} of ${study.total_sessions} sessions rated`;
   if (study.status === "finished" || !panel) {
     el.patientNextNote.textContent = `${trackTitle()} sessions and CTRS evaluations are complete for this patient.`;
@@ -376,31 +366,6 @@ function showPatientProfile() {
     }
   }
   showView("patient");
-}
-
-async function switchEvaluationTrack(track) {
-  if (!state.study || track === state.evaluationTrack) return;
-  if (track === "baselines") {
-    showToast("The current evaluation focuses on the ablation methods. Please complete the ablation sessions now.");
-    return;
-  }
-  el.evaluationTrackButtons.forEach(button => { button.disabled = true; });
-  try {
-    const payload = await api("/api/studies", {
-      method: "POST",
-      body: JSON.stringify({
-        profile_id: state.study.profile.id,
-        evaluation_track: track
-      })
-    });
-    adoptStudy(payload.study);
-    state.ratingPanelId = null;
-    showPatientProfile();
-  } catch (error) {
-    handleAuthenticatedError(error);
-  } finally {
-    el.evaluationTrackButtons.forEach(button => { button.disabled = false; });
-  }
 }
 
 function openProfileDialog() {
@@ -920,9 +885,6 @@ el.home.addEventListener("click", event => {
   else loadProfiles();
 });
 el.beginSession.addEventListener("click", showCurrentStage);
-el.evaluationTrackButtons.forEach(button => {
-  button.addEventListener("click", () => switchEvaluationTrack(button.dataset.evaluationTrack));
-});
 el.nextPatientButton.addEventListener("click", requestNextPatient);
 el.profileButton.addEventListener("click", openProfileDialog);
 el.ratingProfileButton.addEventListener("click", openProfileDialog);

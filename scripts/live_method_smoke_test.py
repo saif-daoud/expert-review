@@ -1,7 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import hmac
+import http.client
 import json
+import os
+import random
+import socket
 import sys
 import time
 import urllib.error
@@ -22,6 +28,13 @@ CTRS_KEYS = (
     "application_of_cbt_techniques",
     "homework",
 )
+ABLATION_METHODS = (
+    "topas_expert_components",
+    "topas_chatgpt_components",
+    "topas_no_rl",
+    "topas_no_conv_state",
+    "topas_full",
+)
 
 
 class ApiError(RuntimeError):
@@ -32,8 +45,9 @@ class ApiError(RuntimeError):
 
 
 class StudyApi:
-    def __init__(self, base_url: str):
+    def __init__(self, base_url: str, evaluation_track: str):
         self.base_url = base_url.rstrip("/")
+        self.evaluation_track = evaluation_track
         self.token = ""
 
     def request(self, method: str, path: str, body: dict | None = None) -> dict:
@@ -50,19 +64,27 @@ class StudyApi:
         request = urllib.request.Request(
             f"{self.base_url}{path}", data=data, headers=headers, method=method
         )
-        try:
-            with urllib.request.urlopen(request, timeout=60) as response:
-                return json.load(response)
-        except urllib.error.HTTPError as exc:
+        for attempt in range(3):
             try:
-                payload = json.load(exc)
-            except (json.JSONDecodeError, UnicodeDecodeError):
-                payload = exc.read().decode("utf-8", errors="replace")
-            raise ApiError(exc.code, payload) from exc
+                with urllib.request.urlopen(request, timeout=60) as response:
+                    return json.load(response)
+            except urllib.error.HTTPError as exc:
+                try:
+                    payload = json.load(exc)
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    payload = exc.read().decode("utf-8", errors="replace")
+                raise ApiError(exc.code, payload) from exc
+            except (urllib.error.URLError, http.client.RemoteDisconnected, socket.timeout):
+                if attempt == 2:
+                    raise
+                time.sleep(2 ** attempt)
+        raise RuntimeError("unreachable")
 
 
 def latest_panel(api: StudyApi, study_id: str, panel_id: str) -> tuple[dict, dict]:
-    study = api.request("GET", f"/api/studies/{study_id}")["study"]
+    study = api.request(
+        "GET", f"/api/studies/{study_id}?evaluation_track={api.evaluation_track}"
+    )["study"]
     panel = next(item for item in study["panels"] if item["id"] == panel_id)
     return study, panel
 
@@ -91,8 +113,39 @@ def wait_for_generation(
     raise TimeoutError(f"{panel_id} did not finish within {timeout_seconds} seconds")
 
 
-def login(api: StudyApi, args: argparse.Namespace) -> None:
-    body = {"email": args.email, "access_code": args.access_code}
+def load_env_file(path: str | None) -> None:
+    if not path:
+        return
+    for raw_line in open(path, encoding="utf-8"):
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        os.environ.setdefault(key.strip(), value)
+
+
+def participant_code_for_email(email: str) -> str:
+    return f"P-{hashlib.sha256(email.strip().lower().encode('utf-8')).hexdigest()[:32]}"
+
+
+def private_method_order(
+    token_secret: str, participant_code: str, profile_id: str, evaluation_track: str
+) -> list[str]:
+    digest = hmac.new(
+        token_secret.encode("utf-8"),
+        f"{participant_code}|{profile_id}|{evaluation_track}|panel-order".encode("utf-8"),
+        hashlib.sha256,
+    ).digest()
+    methods = list(ABLATION_METHODS)
+    random.Random(int.from_bytes(digest, "big")).shuffle(methods)
+    return methods
+
+
+def login(api: StudyApi, args: argparse.Namespace, access_code: str) -> None:
+    body = {"email": args.email, "access_code": access_code}
     try:
         result = api.request("POST", "/api/auth/login", body)
     except ApiError as exc:
@@ -108,7 +161,7 @@ def login(api: StudyApi, args: argparse.Namespace) -> None:
             "/api/auth/login",
             {
                 "participant_code": args.participant_code,
-                "access_code": args.access_code,
+                "access_code": access_code,
             },
         )
     api.token = result["token"]
@@ -138,46 +191,75 @@ def select_profile(api: StudyApi, requested_id: str | None) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Exercise all six real therapist sessions through the public study API."
+        description="Exercise all five real ablation therapist sessions through the public study API."
     )
     parser.add_argument("--base-url", required=True)
-    parser.add_argument("--access-code", required=True)
-    parser.add_argument("--email", default="method-smoke-test@example.org")
+    parser.add_argument("--access-code")
+    parser.add_argument(
+        "--env-file",
+        help="Read STUDY_EXPERT_ACCESS_CODE and STUDY_TOKEN_SECRET without putting secrets on the command line.",
+    )
+    parser.add_argument(
+        "--email",
+        default=f"ablation-smoke-{int(time.time())}-{uuid.uuid4().hex[:8]}@example.org",
+    )
     parser.add_argument(
         "--participant-code",
         help="Compatibility value for an older deployed API that still requires it.",
     )
     parser.add_argument("--profile-id")
+    parser.add_argument("--evaluation-track", default="ablations", choices=("ablations",))
     parser.add_argument("--timeout", type=int, default=900)
     parser.add_argument(
         "--patient-message",
         default=(
-            "I feel tense around authority figures, especially when they become angry. "
-            "I avoid speaking up and my heart starts racing."
+            "This problem has been affecting my daily life, and I am not sure how to handle it. "
+            "I would like help understanding what I can do."
         ),
     )
     args = parser.parse_args()
+    load_env_file(args.env_file)
+    access_code = args.access_code or os.getenv("STUDY_EXPERT_ACCESS_CODE", "")
+    token_secret = os.getenv("STUDY_TOKEN_SECRET", "")
+    if not access_code:
+        raise RuntimeError("Provide --access-code or STUDY_EXPERT_ACCESS_CODE in --env-file")
+    if not token_secret:
+        raise RuntimeError("STUDY_TOKEN_SECRET is required to report the private method mapping")
 
-    api = StudyApi(args.base_url)
+    api = StudyApi(args.base_url, args.evaluation_track)
     health = api.request("GET", "/api/health")
     if health.get("status") != "ok" or health.get("inference", {}).get("mode") != "real":
         raise RuntimeError(f"The live API is not ready for real inference: {health}")
-    login(api, args)
+    login(api, args, access_code)
     profile = select_profile(api, args.profile_id)
-    study = api.request("POST", "/api/studies", {"profile_id": profile["id"]})["study"]
-    print(f"study={study['id']} profile={profile['id']} panels={len(study['panels'])}", flush=True)
+    study = api.request(
+        "POST",
+        "/api/studies",
+        {"profile_id": profile["id"], "evaluation_track": args.evaluation_track},
+    )["study"]
+    participant_code = participant_code_for_email(args.email)
+    method_order = private_method_order(
+        token_secret, participant_code, profile["id"], args.evaluation_track
+    )
+    print(
+        f"email={args.email} study={study['id']} profile={profile['id']} "
+        f"track={args.evaluation_track} panels={len(study['panels'])}",
+        flush=True,
+    )
 
     results: list[dict] = []
     while study["completed_sessions"] < study["total_sessions"]:
         panel = next(item for item in study["panels"] if item["id"] == study["current_panel_id"])
         panel_id = panel["id"]
-        before = len(panel["messages"])
+        method = method_order[int(panel["display_order"])]
+        print(f"starting {panel['label']} method={method}", flush=True)
         if not panel["messages"]:
-            api.request(
-                "POST",
-                f"/api/studies/{study['id']}/panels/{panel_id}/start",
-                {"client_request_id": f"smoke-start-{uuid.uuid4()}"},
-            )
+            if (panel.get("job") or {}).get("status") not in {"queued", "running"}:
+                api.request(
+                    "POST",
+                    f"/api/studies/{study['id']}/panels/{panel_id}/start",
+                    {"client_request_id": f"smoke-start-{uuid.uuid4()}"},
+                )
             study, panel, first_seconds = wait_for_generation(
                 api, study["id"], panel_id, args.timeout
             )
@@ -186,19 +268,27 @@ def main() -> int:
         if not panel["messages"] or panel["messages"][-1]["role"] != "therapist":
             raise RuntimeError(f"{panel['label']} did not produce its opening response")
 
-        api.request(
-            "POST",
-            f"/api/studies/{study['id']}/panels/{panel_id}/messages",
-            {
-                "content": args.patient_message,
-                "client_message_id": f"smoke-message-{uuid.uuid4()}",
-            },
-        )
-        study, panel, reply_seconds = wait_for_generation(api, study["id"], panel_id, args.timeout)
         therapist_messages = [
             item["content"] for item in panel["messages"] if item["role"] == "therapist"
         ]
-        if len(panel["messages"]) < before + 3 or len(therapist_messages) < 2:
+        if len(therapist_messages) < 2:
+            api.request(
+                "POST",
+                f"/api/studies/{study['id']}/panels/{panel_id}/messages",
+                {
+                    "content": args.patient_message,
+                    "client_message_id": f"smoke-message-{uuid.uuid4()}",
+                },
+            )
+            study, panel, reply_seconds = wait_for_generation(
+                api, study["id"], panel_id, args.timeout
+            )
+            therapist_messages = [
+                item["content"] for item in panel["messages"] if item["role"] == "therapist"
+            ]
+        else:
+            reply_seconds = 0.0
+        if len(therapist_messages) < 2:
             raise RuntimeError(f"{panel['label']} did not complete a full response cycle")
         leaked_labels = [
             label
@@ -222,10 +312,12 @@ def main() -> int:
         results.append(
             {
                 "label": panel["label"],
+                "method": method,
+                "opening": therapist_messages[0],
+                "reply": therapist_messages[-1],
                 "opening_seconds": round(first_seconds, 1),
                 "reply_seconds": round(reply_seconds, 1),
                 "message_count": len(panel["messages"]),
-                "reply_preview": therapist_messages[-1][:160],
                 "speaker_label_leaks": leaked_labels,
             }
         )

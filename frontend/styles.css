@@ -248,45 +248,16 @@ input:focus, textarea:focus { border-color: #3a8882; box-shadow: 0 0 0 3px rgba(
 .evaluation-track-card .eyebrow { margin: 0 0 5px; }
 .evaluation-track-card h2 { margin: 0; font-family: inherit; font-size: 18px; }
 .evaluation-track-card p:last-child { margin: 6px 0 0; color: var(--muted); font-size: 14px; }
-.track-switch {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  min-width: 390px;
-  padding: 4px;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  background: #eef4f2;
-}
-.track-option {
-  min-height: 46px;
-  padding: 9px 14px;
-  border: 0;
-  border-radius: 10px;
-  background: transparent;
-  color: var(--muted);
-  font: inherit;
+.evaluation-count {
+  flex: 0 0 auto;
+  padding: 9px 13px;
+  border: 1px solid #bdd9d6;
+  border-radius: 999px;
+  color: var(--teal);
+  background: #edf7f5;
+  font-size: 13px;
   font-weight: 800;
-  cursor: pointer;
 }
-.track-option small {
-  display: inline-block;
-  margin-left: 5px;
-  padding: 2px 6px;
-  border-radius: 99px;
-  background: #d9ece8;
-  color: var(--teal);
-  font-size: 10px;
-  letter-spacing: .04em;
-  text-transform: uppercase;
-}
-.track-option.active {
-  background: var(--paper);
-  color: var(--teal);
-  box-shadow: 0 3px 10px rgba(18, 63, 62, .11);
-}
-.track-option.reference-only { cursor: help; }
-.track-option.reference-only small { background: #e3e8e6; color: #637775; }
-.track-option:disabled { cursor: wait; opacity: .62; }
 .patient-sheet {
   overflow: hidden;
   border: 1px solid var(--line);
@@ -440,7 +411,7 @@ input:focus, textarea:focus { border-color: #3a8882; box-shadow: 0 0 0 3px rgba(
   .patient-heading, .session-heading, .rating-heading { align-items: flex-start; flex-direction: column; }
   .patient-progress { align-self: flex-start; }
   .evaluation-track-card { align-items: stretch; flex-direction: column; gap: 16px; }
-  .track-switch { min-width: 0; width: 100%; }
+  .evaluation-count { align-self: flex-start; }
   .profile-columns { grid-template-columns: 1fr; }
   .profile-columns section, .profile-columns section:nth-child(odd), .profile-columns section:nth-last-child(-n + 2) { border-right: 0; border-bottom: 1px solid var(--line); }
   .profile-columns section:last-child { border-bottom: 0; }

@@ -80,7 +80,7 @@ def _configure_ablation_method(method: str, model_root: Path) -> None:
         )
         os.environ["SIMULATION_CONV_STATE_DIR"] = _configured_path(
             "STUDY_TOPAS_FULL_CONV_STATE_DIR",
-            model_root / "topas" / "full" / "runs" / "sft_conv_state_acts_L22",
+            full_runs / "sft_conv_state_acts_L22",
         )
         os.environ["SIMULATION_MEMORY_RETRIEVER_DIR"] = _configured_path(
             "STUDY_TOPAS_FULL_MEMORY_RETRIEVER_DIR",
@@ -147,7 +147,7 @@ def _configure_ablation_method(method: str, model_root: Path) -> None:
         )
         os.environ["SIMULATION_CONV_STATE_DIR"] = _configured_path(
             "STUDY_TOPAS_CHAT_CONV_STATE_DIR",
-            runs_root / "sft_conv_state_acts_L22_Chat",
+            runs_root / "sft_conv_state_acts_L22_CHATGPT",
         )
         os.environ["SIMULATION_MACRO_POLICY_DIR"] = _configured_path(
             "STUDY_TOPAS_CHAT_MACRO_POLICY_DIR", runs_root / "chat_O_22"
@@ -165,14 +165,14 @@ def _configure_ablation_method(method: str, model_root: Path) -> None:
         macro_dir = Path(
             _configured_path(
                 "STUDY_TOPAS_NO_CONV_MACRO_POLICY_DIR",
-                no_conv_runs / "iql_policy_over_options_acts_L22",
+                no_conv_runs / "TOPAS_Options_wo_cvstates22",
             )
         )
         os.environ["SIMULATION_RUNS_DIR"] = str(no_conv_runs)
         os.environ["SIMULATION_MACRO_POLICY_DIR"] = str(macro_dir)
         os.environ["SIMULATION_MICRO_POLICY_DIR"] = _configured_path(
             "STUDY_TOPAS_NO_CONV_MICRO_POLICY_DIR",
-            no_conv_runs / "iql_micro_policies_acts_L22",
+            no_conv_runs / "TOPAS_Primitive_wo_cvstates22",
         )
         # The no-conversation-state launcher reads the action space saved with
         # its macro checkpoint rather than using a separate component folder.
