@@ -248,6 +248,22 @@ def test_bundled_ablation_sources_match_the_latest_simulation_runtime():
         ).read_bytes().rstrip(b"\r\n")
 
 
+def test_theramind_receives_the_original_private_patientact_record():
+    import json
+
+    from server.profiles import PUBLIC_PROFILE_IDS, _profile_path, policy_profile
+
+    source_id = "patient_act_001"
+    public_id = PUBLIC_PROFILE_IDS[source_id]
+    raw = {
+        item["profile_id"]: item
+        for item in json.loads(_profile_path().read_text(encoding="utf-8"))
+    }
+
+    assert policy_profile(public_id) == raw[source_id]
+    assert "profile" in policy_profile(public_id)
+
+
 def test_leaked_speaker_markers_are_generation_boundaries():
     raw = (
         "Hello, it's okay to share. What comes to mind first?"

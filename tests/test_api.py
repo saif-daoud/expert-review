@@ -841,13 +841,14 @@ def test_ablation_track_is_default_focus_without_changing_original_panels(monkey
         assert ablations.status_code == 200
         ablation_study = ablations.json()["study"]
         assert ablation_study["evaluation_track"] == "ablations"
-        assert ablation_study["total_sessions"] == 5
+        assert ablation_study["total_sessions"] == 6
         assert [panel["label"] for panel in ablation_study["panels"]] == [
             "Therapist A",
             "Therapist B",
             "Therapist C",
             "Therapist D",
             "Therapist E",
+            "Therapist F",
         ]
         assert "method_key" not in str(ablation_study)
 
@@ -886,10 +887,10 @@ def test_ablation_track_is_default_focus_without_changing_original_panels(monkey
             headers=headers,
         )
         assert reread.status_code == 200
-        assert reread.json()["study"]["total_sessions"] == 5
+        assert reread.json()["study"]["total_sessions"] == 6
 
 
-def test_existing_four_panel_ablation_study_is_extended_without_reassignment(
+def test_existing_five_panel_ablation_study_is_extended_without_reassignment(
     monkeypatch, tmp_path
 ):
     with load_client(monkeypatch, tmp_path) as client:
@@ -907,7 +908,7 @@ def test_existing_four_panel_ablation_study_is_extended_without_reassignment(
                 """
                 SELECT id, method_key FROM study_panels
                 WHERE study_id = ? AND evaluation_track = 'ablations'
-                AND method_key != 'topas_full'
+                AND method_key != 'theramind'
                 ORDER BY display_order
                 """,
                 (study["id"],),
@@ -917,7 +918,7 @@ def test_existing_four_panel_ablation_study_is_extended_without_reassignment(
                 """
                 DELETE FROM study_panels
                 WHERE study_id = ? AND evaluation_track = 'ablations'
-                AND method_key = 'topas_full'
+                AND method_key = 'theramind'
                 """,
                 (study["id"],),
             )
@@ -932,7 +933,7 @@ def test_existing_four_panel_ablation_study_is_extended_without_reassignment(
         profile_after_migration = client.get("/api/profiles", headers=headers)
         assert profile_after_migration.status_code == 200
         migrated_study = profile_after_migration.json()["profiles"][0]["study"]
-        assert migrated_study["total_sessions"] == 5
+        assert migrated_study["total_sessions"] == 6
 
         upgraded = client.post(
             "/api/studies",
@@ -941,9 +942,9 @@ def test_existing_four_panel_ablation_study_is_extended_without_reassignment(
         )
         assert upgraded.status_code == 200
         panels = upgraded.json()["study"]["panels"]
-        assert len(panels) == 5
-        assert {panel["id"] for panel in panels[:4]} == old_ids
-        assert panels[-1]["label"] == "Therapist E"
+        assert len(panels) == 6
+        assert {panel["id"] for panel in panels[:5]} == old_ids
+        assert panels[-1]["label"] == "Therapist F"
 
         with app_module.database() as connection:
             added = connection.execute(
@@ -954,8 +955,8 @@ def test_existing_four_panel_ablation_study_is_extended_without_reassignment(
                 """,
                 (study["id"],),
             ).fetchone()
-        assert added["method_key"] == "topas_full"
-        assert added["display_order"] == 4
+        assert added["method_key"] == "theramind"
+        assert added["display_order"] == 5
 
 
 def test_ablation_and_original_sequences_are_independent(monkeypatch, tmp_path):
@@ -995,7 +996,7 @@ def test_ablation_and_original_sequences_are_independent(monkeypatch, tmp_path):
         assert ablation_view["current_panel_id"] == ablations["panels"][0]["id"]
 
 
-def test_completing_five_ablations_unlocks_the_next_patient(monkeypatch, tmp_path):
+def test_completing_six_ablations_unlocks_the_next_patient(monkeypatch, tmp_path):
     with load_client(monkeypatch, tmp_path) as client:
         headers = login(client, "EXPERT-5834", "complete-ablations@example.org")
         profile = client.get("/api/profiles", headers=headers).json()["profiles"][0]
@@ -1006,7 +1007,7 @@ def test_completing_five_ablations_unlocks_the_next_patient(monkeypatch, tmp_pat
         ).json()["study"]
         scores = {key: 4 for key in sys.modules["server.app"].CTRS_KEYS}
 
-        for index in range(5):
+        for index in range(6):
             panel = next(
                 item for item in study["panels"] if item["id"] == study["current_panel_id"]
             )
@@ -1040,8 +1041,8 @@ def test_completing_five_ablations_unlocks_the_next_patient(monkeypatch, tmp_pat
 
         assert study["evaluation_track"] == "ablations"
         assert study["status"] == "finished"
-        assert study["total_sessions"] == 5
+        assert study["total_sessions"] == 6
         profile_payload = client.get("/api/profiles", headers=headers).json()
-        assert profile_payload["profiles"][0]["study"]["completed_sessions"] == 5
+        assert profile_payload["profiles"][0]["study"]["completed_sessions"] == 6
         assert profile_payload["can_request_next"] is True
         assert client.post("/api/assignments/next", headers=headers).status_code == 200

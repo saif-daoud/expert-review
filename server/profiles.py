@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import os
+from copy import deepcopy
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -231,6 +233,38 @@ def load_profiles() -> dict[str, dict[str, Any]]:
                 ],
             }
     return selected
+
+
+@lru_cache(maxsize=1)
+def _raw_profiles() -> dict[str, dict[str, Any]]:
+    path = _profile_path()
+    if not path.is_file():
+        raise RuntimeError(
+            f"PatientAct data was not found at {path}. Set STUDY_PROFILES_PATH to override it."
+        )
+    with path.open("r", encoding="utf-8") as handle:
+        return {
+            str(item.get("profile_id")): item
+            for item in json.load(handle)
+        }
+
+
+def policy_profile(profile_id: str) -> dict[str, Any]:
+    """Return the private PatientAct record used by profile-aware policies.
+
+    The browser receives only ``public_profile``. This full record travels only
+    between the API and its local model subprocess so TheraMind sees the same
+    patient input as it does in the simulation runner.
+    """
+
+    public_to_source = {public_id: source_id for source_id, public_id in PUBLIC_PROFILE_IDS.items()}
+    source_id = public_to_source.get(str(profile_id))
+    if source_id is None:
+        raise ValueError(f"Unknown patient profile: {profile_id}")
+    try:
+        return deepcopy(_raw_profiles()[source_id])
+    except KeyError as exc:
+        raise ValueError(f"PatientAct profile is missing: {source_id}") from exc
 
 
 def profile_card(

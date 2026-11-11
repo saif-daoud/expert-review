@@ -226,7 +226,7 @@ function adoptStudy(study) {
     state.ablationIncomplete = Boolean(
       study
       && study.status !== "finished"
-      && Number(study.completed_sessions || 0) < Number(study.total_sessions || 5)
+      && Number(study.completed_sessions || 0) < Number(study.total_sessions || 6)
     );
   }
 }
@@ -251,7 +251,7 @@ function renderProfiles() {
     button.type = "button";
     button.className = "patient-card";
     const completed = profile.study?.completed_sessions || 0;
-    const total = profile.study?.total_sessions || 5;
+    const total = profile.study?.total_sessions || 6;
     const statusText = profile.study?.status === "finished"
       ? "Completed"
       : profile.study

@@ -4,8 +4,8 @@ Place this directory anywhere writable by your user, such as `~/clean-env/server
 code, policies, prompt, and PatientAct profile data; it does not import Python code from `simulations/` or `baselines/`.
 The large trained checkpoint paths are configured in `.env`. FastAPI and all model workers run without root access.
 All experts use one shared access code and are tracked by email. Each new expert receives one patient. The local
-ablation-study interface presents only the five focused TOPAS variants. Historical sessions from the six original
-therapist methods remain preserved in the database but are not exposed by the website. After the five focused sessions and ratings are complete, the expert can request
+ablation-study interface presents five focused TOPAS variants plus TheraMind. Historical sessions from the six original
+therapist methods remain preserved in the database but are not exposed by the website. After the six focused sessions and ratings are complete, the expert can request
 another patient. An unused offer is released, while the first CTRS
 rating permanently claims that patient for the expert. Display numbering is account-relative and always begins at
 Patient 1. No participant code is entered on the website. First-time users complete a professional profile. Sessions

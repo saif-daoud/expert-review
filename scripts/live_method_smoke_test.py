@@ -34,6 +34,7 @@ ABLATION_METHODS = (
     "topas_no_rl",
     "topas_no_conv_state",
     "topas_full",
+    "theramind",
 )
 
 
@@ -191,7 +192,7 @@ def select_profile(api: StudyApi, requested_id: str | None) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Exercise all five real ablation therapist sessions through the public study API."
+        description="Exercise all six real focused therapist sessions through the public study API."
     )
     parser.add_argument("--base-url", required=True)
     parser.add_argument("--access-code")

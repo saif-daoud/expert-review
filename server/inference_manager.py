@@ -34,6 +34,7 @@ RUNTIME_BY_METHOD = {
     "topas_no_rl": "base",
     "topas_no_conv_state": "base",
     "topas_full": "base",
+    "theramind": "base",
     "archer": "archer",
     "aria": "aria",
     "sweet_rl": "sweet_rl",
@@ -226,7 +227,12 @@ class ModelWorker:
             start_new_session=True,
         )
 
-    def generate(self, method: str, history: list[dict[str, str]]) -> str:
+    def generate(
+        self,
+        method: str,
+        history: list[dict[str, str]],
+        profile_id: str | None = None,
+    ) -> str:
         if method != self.method:
             raise RuntimeError(
                 f"Session worker for {self.method!r} cannot run method {method!r}."
@@ -235,7 +241,12 @@ class ModelWorker:
         assert self.process is not None and self.process.stdin is not None and self.process.stdout is not None
         process = self.process
         request_id = str(uuid.uuid4())
-        request = {"id": request_id, "method": method, "history": history}
+        request = {
+            "id": request_id,
+            "method": method,
+            "history": history,
+            "profile_id": profile_id,
+        }
         try:
             process.stdin.write(json.dumps(request, ensure_ascii=False) + "\n")
             process.stdin.flush()
@@ -380,7 +391,7 @@ class InferenceManager:
             connection.execute("BEGIN IMMEDIATE")
             job = connection.execute(
                 """
-                SELECT j.*, p.method_key, p.study_id
+                SELECT j.*, p.method_key, p.study_id, s.profile_id
                 FROM inference_jobs AS j
                 JOIN study_panels AS p ON p.id = j.panel_id
                 JOIN studies AS s ON s.id = p.study_id
@@ -429,6 +440,7 @@ class InferenceManager:
         panel_id: str,
         method: str,
         history: list[dict[str, str]],
+        profile_id: str | None = None,
     ) -> str:
         if self.mode != "real":
             return self._static_response(method, history)
@@ -439,7 +451,9 @@ class InferenceManager:
             worker = self.workers.get(panel_id)
         if worker is not None:
             try:
-                return worker.generate(method, history)
+                if profile_id is None:
+                    return worker.generate(method, history)
+                return worker.generate(method, history, profile_id)
             except Exception as exc:
                 diagnostic = worker.diagnostic_tail()
                 if not self._is_gpu_memory_error(exc, diagnostic):
@@ -476,7 +490,9 @@ class InferenceManager:
                     self.workers[panel_id] = worker
                     self._last_activity[panel_id] = time.monotonic()
             try:
-                return worker.generate(method, history)
+                if profile_id is None:
+                    return worker.generate(method, history)
+                return worker.generate(method, history, profile_id)
             except Exception as exc:
                 with self._workers_lock:
                     if self.workers.get(panel_id) is worker:
@@ -673,7 +689,12 @@ class InferenceManager:
                     self._busy_panels.add(job["panel_id"])
                     if job["panel_id"] in self.workers:
                         self._last_activity[job["panel_id"]] = time.monotonic()
-                utterance = self._generate(job["panel_id"], job["method_key"], history)
+                utterance = self._generate(
+                    job["panel_id"],
+                    job["method_key"],
+                    history,
+                    job["profile_id"],
+                )
                 automatic_end = self._complete_job(job, utterance)
                 if automatic_end:
                     self.release_panel(job["panel_id"])

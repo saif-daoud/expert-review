@@ -80,6 +80,7 @@ ABLATION_METHOD_KEYS = [
     "topas_no_rl",
     "topas_no_conv_state",
     "topas_full",
+    "theramind",
 ]
 EVALUATION_TRACKS = {
     "baselines": {
@@ -95,6 +96,7 @@ EVALUATION_TRACKS = {
             "Therapist C",
             "Therapist D",
             "Therapist E",
+            "Therapist F",
         ],
         "internal_label_prefix": "Ablation ",
     },

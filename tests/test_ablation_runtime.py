@@ -4,13 +4,33 @@ import os
 from pathlib import Path
 
 from server import method_worker
-from server.ablation_runtime.agents import PromptActionPolicy, build_policy
+from server.ablation_runtime.agents import PromptActionPolicy, TheraMindPolicy, build_policy
 from server.ablation_runtime.config import CBT_DOMAIN
 
 
 class FakeGenerator:
     def reset_turn_stats(self):
         return None
+
+
+class RecordingGenerator:
+    def __init__(self, outputs: list[str]):
+        self.outputs = iter(outputs)
+        self.calls: list[dict] = []
+        self.max_new_tokens = 512
+        self.temperature = 0.7
+        self.top_p = 0.9
+        self.last_prompt_diagnostics = {}
+
+    def reset_turn_stats(self):
+        return None
+
+    def turn_stats(self):
+        return {"calls": len(self.calls)}
+
+    def generate(self, **kwargs):
+        self.calls.append(kwargs)
+        return next(self.outputs)
 
 
 def test_expert_component_worker_matches_simulation_flags(monkeypatch, tmp_path: Path):
@@ -118,6 +138,73 @@ def test_topas_full_matches_the_full_memory_launcher(monkeypatch, tmp_path: Path
     assert os.environ["THERAPIST_TEMPERATURE"] == "0.7"
     assert os.environ["THERAPIST_TOP_P"] == "0.9"
     assert Path(os.environ["TOPA_COMPONENTS_DIR"]).name == "no_rl"
+
+
+def test_theramind_matches_simulation_runtime_and_uses_patient_profile(
+    monkeypatch, tmp_path: Path
+):
+    monkeypatch.setenv("STUDY_MODEL_ROOT", str(tmp_path / "models"))
+    method_worker.configure_runtime("base", "theramind")
+
+    assert os.environ["THERAPIST_HF_TORCH_DTYPE"] == "bf16"
+    assert os.environ["THERAPIST_TEMPERATURE"] == "0.9"
+    assert os.environ["THERAPIST_TOP_P"] == "0.75"
+
+    profile = {
+        "name": "Test Patient",
+        "summary": "Persistent anxiety about an upcoming examination.",
+        "relevant_history": "Anxiety has increased over several months.",
+        "profile": {
+            "demographics": {"age_group": "Adult"},
+            "physical_health_history": "No significant history.",
+        },
+    }
+    generator = RecordingGenerator(
+        [
+            "cognitive-behavioral therapy",
+            "False",
+            "False",
+            '{"primary_emotion": "fear", "emotional_intensity": 0.8}',
+            "The patient is worried about an upcoming examination.",
+            "Initial assessment is clarifying anxiety triggers and their impact.",
+            '{"strategy": "Invite to Take New Perspectives", '
+            '"strategy_text": "Explore a more balanced interpretation of the feared outcome."}',
+            "It makes sense that the exam feels overwhelming. What do you imagine would happen "
+            "if the result were not what you hoped for?",
+        ]
+    )
+    policy = build_policy(
+        generator,
+        "theramind",
+        tmp_path,
+        CBT_DOMAIN,
+        profile=profile,
+    )
+    response, metadata = policy.respond("Patient: Hello")
+
+    assert isinstance(policy, TheraMindPolicy)
+    assert response.startswith("Hello, I'm your psychological counselor")
+    assert policy.current_therapy == "cognitive-behavioral therapy"
+    assert generator.calls[0]["system"] == policy.COUNSELOR_SYSTEM_PROMPT
+    assert "Persistent anxiety about an upcoming examination." in generator.calls[0]["user"]
+    assert metadata["theramind_metadata"]["current_therapy"] == "cognitive-behavioral therapy"
+
+    response, metadata = policy.respond(
+        "Patient: Hello\n"
+        "Therapist: Hello, I'm your psychological counselor.\n"
+        "Patient: I cannot stop worrying that I will fail the examination."
+    )
+
+    assert response.startswith("It makes sense that the exam feels overwhelming")
+    assert len(generator.calls) == 8
+    assert metadata["theramind_metadata"]["patient_state"] == {
+        "primary_emotion": "fear",
+        "emotional_intensity": 0.8,
+        "attitude": "cooperative",
+    }
+    assert metadata["theramind_metadata"]["response_strategy"]["strategy"] == (
+        "Invite to Take New Perspectives"
+    )
 
 
 def test_all_ablation_methods_use_the_base_conda_runtime():

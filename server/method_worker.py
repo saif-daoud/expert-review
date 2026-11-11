@@ -20,6 +20,7 @@ ABLATION_METHODS = {
     "topas_no_rl",
     "topas_no_conv_state",
     "topas_full",
+    "theramind",
 }
 ABLATION_POLICY_METHODS = {
     "topas_expert_components": "iql_policy_term_intra_with_conv",
@@ -27,6 +28,7 @@ ABLATION_POLICY_METHODS = {
     "topas_no_rl": "topas_no_rl",
     "topas_no_conv_state": "iql_policy_term_intra_no_conv",
     "topas_full": "iql_policy_term_intra_with_conv",
+    "theramind": "theramind",
 }
 # Imported simulation code uses stdout for diagnostics. Keep stdout reserved for
 # machine-readable protocol messages and send all diagnostics to the model log.
@@ -205,6 +207,14 @@ def configure_runtime(runtime: str, method: str) -> None:
         os.environ.setdefault("THERAPIST_HF_MAX_INPUT_LENGTH", "512")
         os.environ.setdefault("THERAPIST_PROMPTING_SYSTEM_PROMPT_PATH", str(prompt))
         if method in ABLATION_METHODS:
+            if method == "theramind":
+                # Match run_simulation.sh: base Qwen backbone, bf16, and the
+                # official TheraMind sampling parameters. The policy itself
+                # caps every internal module call at 96 new tokens.
+                os.environ["THERAPIST_HF_TORCH_DTYPE"] = "bf16"
+                os.environ["THERAPIST_TEMPERATURE"] = "0.9"
+                os.environ["THERAPIST_TOP_P"] = "0.75"
+                return
             _configure_ablation_method(method, model_root)
             return
         if method == "topas":
@@ -347,12 +357,23 @@ def main() -> int:
                     if method in ABLATION_METHODS:
                         from ablation_runtime.agents import build_policy as build_ablation_policy
                         from ablation_runtime.config import CBT_DOMAIN as ABLATION_CBT_DOMAIN
+                        from profiles import policy_profile
+
+                        profile_id = str(request.get("profile_id") or "").strip()
+                        profile = policy_profile(profile_id) if method == "theramind" else None
+                        components_dir = Path(
+                            os.environ.get(
+                                "TOPA_COMPONENTS_DIR",
+                                str(SERVER_DIR / "assets" / "ablation_components" / "no_rl"),
+                            )
+                        )
 
                         policies[method] = build_ablation_policy(
                             generator,
                             ABLATION_POLICY_METHODS[method],
-                            Path(os.environ["TOPA_COMPONENTS_DIR"]),
+                            components_dir,
                             ABLATION_CBT_DOMAIN,
+                            profile=profile,
                         )
                         reset_session = getattr(policies[method], "reset_session", None)
                         if reset_session is not None:
@@ -371,6 +392,17 @@ def main() -> int:
             if args.runtime == "base" and hasattr(generator, "prompt_style"):
                 generator.prompt_style = "raw" if method == "prompting" else "chat"
             transcript = transcript_from_history(list(request.get("history") or []))
+            if (
+                method == "theramind"
+                and not getattr(policies[method], "current_therapy", None)
+                and request.get("history")
+            ):
+                # A session worker may be unloaded after the idle timeout. On
+                # reload, restore TheraMind's first-session initialization and
+                # discard its already-seen fixed greeting before responding to
+                # the latest patient turn.
+                with redirect_stdout(sys.stderr):
+                    policies[method].respond("Patient: Hello")
             generator.reset_turn_stats()
             with redirect_stdout(sys.stderr):
                 utterance, _metadata = policies[method].respond(transcript)
