@@ -10,6 +10,7 @@ const storageKeys = {
   email: "cbt-live/email"
 };
 const incompletePatientWarning = "Your input for this patient is incomplete. Please finish the remaining ablation therapist session(s) and submit their ratings before leaving.";
+const websiteRefreshRequiredText = "The study website has been updated with new therapist methods.";
 const state = {
   token: sessionStorage.getItem(storageKeys.token) || "",
   email: sessionStorage.getItem(storageKeys.email) || "",
@@ -193,6 +194,11 @@ function confirmLeavingIncompletePatient() {
 }
 
 function handleAuthenticatedError(error) {
+  if (error.status === 409 && error.message.includes(websiteRefreshRequiredText)) {
+    window.alert(`${error.message}\n\nThe page will now refresh.`);
+    window.location.reload();
+    return;
+  }
   if (error.status === 401) {
     signOut();
     showToast("Your sign-in expired. Please enter your codes again.", true);

@@ -12,7 +12,7 @@ TEST_ACCESS_CODE = "one-shared-access-code"
 OLD_SECOND_ACCESS_CODE = "retired-second-expert-access-code"
 
 
-def load_client(monkeypatch, tmp_path, max_session_turns=50):
+def load_client(monkeypatch, tmp_path, max_session_turns=50, baseline_read_only=False):
     monkeypatch.setenv("STUDY_DB_PATH", str(tmp_path / "study.sqlite3"))
     monkeypatch.setenv("STUDY_EXPERT_ACCESS_CODE", TEST_ACCESS_CODE)
     monkeypatch.setenv("STUDY_EXPERT_2_ACCESS_CODE", OLD_SECOND_ACCESS_CODE)
@@ -21,6 +21,10 @@ def load_client(monkeypatch, tmp_path, max_session_turns=50):
     monkeypatch.setenv("STUDY_SERVE_FRONTEND", "false")
     monkeypatch.setenv("STUDY_INFERENCE_MODE", "static")
     monkeypatch.setenv("STUDY_MAX_SESSION_TURNS", str(max_session_turns))
+    monkeypatch.setenv(
+        "STUDY_BASELINE_INTERACTIONS_READ_ONLY",
+        "true" if baseline_read_only else "false",
+    )
     sys.modules.pop("server.app", None)
     module = importlib.import_module("server.app")
     return TestClient(module.app)
@@ -888,6 +892,45 @@ def test_ablation_track_is_default_focus_without_changing_original_panels(monkey
         )
         assert reread.status_code == 200
         assert reread.json()["study"]["total_sessions"] == 6
+
+
+def test_retired_baseline_tab_is_told_to_refresh_and_cannot_continue(monkeypatch, tmp_path):
+    email = "old-browser-tab@example.org"
+    with load_client(monkeypatch, tmp_path, baseline_read_only=False) as client:
+        headers = login(client, "EXPERT-5834", email)
+        profile = client.get("/api/profiles", headers=headers).json()["profiles"][0]
+        baseline = client.post(
+            "/api/studies",
+            headers=headers,
+            json={"profile_id": profile["id"], "evaluation_track": "baselines"},
+        ).json()["study"]
+        baseline_panel = baseline["panels"][0]
+
+    with load_client(monkeypatch, tmp_path, baseline_read_only=True) as client:
+        headers = login(client, "EXPERT-5834", email)
+        blocked = client.post(
+            f"/api/studies/{baseline['id']}/panels/{baseline_panel['id']}/start",
+            headers=headers,
+            json={"client_request_id": "old-tab-start"},
+        )
+        assert blocked.status_code == 409
+        assert "website has been updated" in blocked.json()["detail"]
+        assert "refresh" in blocked.json()["detail"].lower()
+
+        explicit_baseline = client.post(
+            "/api/studies",
+            headers=headers,
+            json={"profile_id": profile["id"], "evaluation_track": "baselines"},
+        )
+        assert explicit_baseline.status_code == 409
+
+        refreshed = client.post(
+            "/api/studies",
+            headers=headers,
+            json={"profile_id": profile["id"]},
+        )
+        assert refreshed.status_code == 200
+        assert refreshed.json()["study"]["evaluation_track"] == "ablations"
 
 
 def test_existing_five_panel_ablation_study_is_extended_without_reassignment(

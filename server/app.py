@@ -68,6 +68,9 @@ ALLOWED_ORIGINS = [
     if origin.strip()
 ]
 SERVE_FRONTEND = os.getenv("STUDY_SERVE_FRONTEND", "false").strip().lower() in {"1", "true", "yes", "on"}
+BASELINE_INTERACTIONS_READ_ONLY = os.getenv(
+    "STUDY_BASELINE_INTERACTIONS_READ_ONLY", "true"
+).strip().lower() in {"1", "true", "yes", "on"}
 
 PARTICIPANT_CODE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{1,63}$")
 EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
@@ -102,6 +105,13 @@ EVALUATION_TRACKS = {
     },
 }
 PRIMARY_EVALUATION_TRACK = "ablations"
+DEFAULT_EVALUATION_TRACK = (
+    PRIMARY_EVALUATION_TRACK if BASELINE_INTERACTIONS_READ_ONLY else "baselines"
+)
+WEBSITE_REFRESH_REQUIRED_MESSAGE = (
+    "The study website has been updated with new therapist methods. "
+    "Please refresh this page before continuing. Your previous progress remains saved."
+)
 CTRS_KEYS = (
     "agenda",
     "feedback",
@@ -147,7 +157,7 @@ class ParticipantProfileRequest(BaseModel):
 
 class StudyRequest(BaseModel):
     profile_id: str
-    evaluation_track: str = "baselines"
+    evaluation_track: str = DEFAULT_EVALUATION_TRACK
 
 
 class MessageRequest(BaseModel):
@@ -756,7 +766,12 @@ def get_study(connection: sqlite3.Connection, study_id: str, participant_code: s
 
 
 def get_panel(
-    connection: sqlite3.Connection, study_id: str, panel_id: str, participant_code: str
+    connection: sqlite3.Connection,
+    study_id: str,
+    panel_id: str,
+    participant_code: str,
+    *,
+    require_writable: bool = False,
 ) -> tuple[sqlite3.Row, sqlite3.Row]:
     study = get_study(connection, study_id, participant_code)
     panel = connection.execute(
@@ -765,6 +780,12 @@ def get_panel(
     ).fetchone()
     if panel is None:
         raise HTTPException(status_code=404, detail="Conversation not found.")
+    if (
+        require_writable
+        and BASELINE_INTERACTIONS_READ_ONLY
+        and str(panel["evaluation_track"] or "baselines") != PRIMARY_EVALUATION_TRACK
+    ):
+        raise HTTPException(status_code=409, detail=WEBSITE_REFRESH_REQUIRED_MESSAGE)
     return study, panel
 
 
@@ -1418,6 +1439,8 @@ def release_current_patient(participant_code: str = Depends(require_participant)
 def create_study(payload: StudyRequest, participant_code: str = Depends(require_participant)) -> dict:
     profile_id = payload.profile_id.strip()
     evaluation_track = _validate_evaluation_track(payload.evaluation_track)
+    if BASELINE_INTERACTIONS_READ_ONLY and evaluation_track != PRIMARY_EVALUATION_TRACK:
+        raise HTTPException(status_code=409, detail=WEBSITE_REFRESH_REQUIRED_MESSAGE)
     now = utc_now()
     with DATABASE_LOCK, database() as connection:
         connection.execute("BEGIN IMMEDIATE")
@@ -1456,7 +1479,7 @@ def create_study(payload: StudyRequest, participant_code: str = Depends(require_
 @app.get("/api/studies/{study_id}")
 def read_study(
     study_id: str,
-    evaluation_track: str = "baselines",
+    evaluation_track: str = DEFAULT_EVALUATION_TRACK,
     participant_code: str = Depends(require_participant),
 ) -> dict:
     evaluation_track = _validate_evaluation_track(evaluation_track)
@@ -1475,7 +1498,9 @@ def start_panel(
     request_id = _validate_request_id(payload.client_request_id)
     with DATABASE_LOCK, database() as connection:
         connection.execute("BEGIN IMMEDIATE")
-        study, panel = get_panel(connection, study_id, panel_id, participant_code)
+        study, panel = get_panel(
+            connection, study_id, panel_id, participant_code, require_writable=True
+        )
         if _track_is_complete(connection, study_id, _panel_track(panel)):
             connection.rollback()
             raise HTTPException(status_code=409, detail="This patient study is finished.")
@@ -1559,7 +1584,9 @@ def send_message(
         raise HTTPException(status_code=422, detail="Messages cannot exceed 4,000 characters.")
     with DATABASE_LOCK, database() as connection:
         connection.execute("BEGIN IMMEDIATE")
-        study, panel = get_panel(connection, study_id, panel_id, participant_code)
+        study, panel = get_panel(
+            connection, study_id, panel_id, participant_code, require_writable=True
+        )
         duplicate = connection.execute(
             "SELECT * FROM inference_jobs WHERE panel_id = ? AND client_request_id = ?",
             (panel_id, request_id),
@@ -1654,7 +1681,9 @@ def retry_panel(
     request_id = _validate_request_id(payload.client_request_id)
     with DATABASE_LOCK, database() as connection:
         connection.execute("BEGIN IMMEDIATE")
-        study, panel = get_panel(connection, study_id, panel_id, participant_code)
+        study, panel = get_panel(
+            connection, study_id, panel_id, participant_code, require_writable=True
+        )
         if _track_is_complete(connection, study_id, _panel_track(panel)):
             connection.rollback()
             raise HTTPException(status_code=409, detail="This patient study is finished.")
@@ -1718,7 +1747,9 @@ def end_panel(
     now = utc_now()
     with DATABASE_LOCK, database() as connection:
         connection.execute("BEGIN IMMEDIATE")
-        study, panel = get_panel(connection, study_id, panel_id, participant_code)
+        study, panel = get_panel(
+            connection, study_id, panel_id, participant_code, require_writable=True
+        )
         if _track_is_complete(connection, study_id, _panel_track(panel)):
             connection.rollback()
             raise HTTPException(status_code=409, detail="This patient study is finished.")
@@ -1763,7 +1794,9 @@ def rate_panel(
     now = utc_now()
     with DATABASE_LOCK, database() as connection:
         connection.execute("BEGIN IMMEDIATE")
-        study, panel = get_panel(connection, study_id, panel_id, participant_code)
+        study, panel = get_panel(
+            connection, study_id, panel_id, participant_code, require_writable=True
+        )
         existing = connection.execute(
             "SELECT total_score FROM panel_ratings WHERE panel_id = ?", (panel_id,)
         ).fetchone()
@@ -1820,10 +1853,12 @@ def rate_panel(
 @app.post("/api/studies/{study_id}/finish")
 def finish_study(
     study_id: str,
-    evaluation_track: str = "baselines",
+    evaluation_track: str = DEFAULT_EVALUATION_TRACK,
     participant_code: str = Depends(require_participant),
 ) -> dict:
     evaluation_track = _validate_evaluation_track(evaluation_track)
+    if BASELINE_INTERACTIONS_READ_ONLY and evaluation_track != PRIMARY_EVALUATION_TRACK:
+        raise HTTPException(status_code=409, detail=WEBSITE_REFRESH_REQUIRED_MESSAGE)
     with DATABASE_LOCK, database() as connection:
         connection.execute("BEGIN IMMEDIATE")
         study = get_study(connection, study_id, participant_code)
