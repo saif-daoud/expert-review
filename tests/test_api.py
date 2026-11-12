@@ -908,6 +908,11 @@ def test_retired_baseline_tab_is_told_to_refresh_and_cannot_continue(monkeypatch
 
     with load_client(monkeypatch, tmp_path, baseline_read_only=True) as client:
         headers = login(client, "EXPERT-5834", email)
+        cards = client.get("/api/profiles", headers=headers).json()["profiles"]
+        assert len(cards) == 1
+        assert cards[0]["study"]["evaluation_track"] == "ablations"
+        assert cards[0]["study"]["completed_sessions"] == 0
+        assert cards[0]["study"]["total_sessions"] == 6
         blocked = client.post(
             f"/api/studies/{baseline['id']}/panels/{baseline_panel['id']}/start",
             headers=headers,
@@ -1040,7 +1045,7 @@ def test_ablation_and_original_sequences_are_independent(monkeypatch, tmp_path):
 
 
 def test_completing_six_ablations_unlocks_the_next_patient(monkeypatch, tmp_path):
-    with load_client(monkeypatch, tmp_path) as client:
+    with load_client(monkeypatch, tmp_path, baseline_read_only=True) as client:
         headers = login(client, "EXPERT-5834", "complete-ablations@example.org")
         profile = client.get("/api/profiles", headers=headers).json()["profiles"][0]
         study = client.post(
@@ -1088,4 +1093,7 @@ def test_completing_six_ablations_unlocks_the_next_patient(monkeypatch, tmp_path
         profile_payload = client.get("/api/profiles", headers=headers).json()
         assert profile_payload["profiles"][0]["study"]["completed_sessions"] == 6
         assert profile_payload["can_request_next"] is True
-        assert client.post("/api/assignments/next", headers=headers).status_code == 200
+        next_patient = client.post("/api/assignments/next", headers=headers)
+        assert next_patient.status_code == 200
+        assert len(next_patient.json()["profiles"]) == 1
+        assert next_patient.json()["profiles"][0]["display_number"] == 2

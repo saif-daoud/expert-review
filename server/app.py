@@ -827,6 +827,8 @@ def _track_counts(
 
 
 def _primary_track(connection: sqlite3.Connection, study_id: str) -> str:
+    if BASELINE_INTERACTIONS_READ_ONLY:
+        return PRIMARY_EVALUATION_TRACK
     has_ablations = connection.execute(
         """
         SELECT 1 FROM study_panels
@@ -1367,10 +1369,19 @@ def profiles_payload(connection: sqlite3.Connection, participant_code: str) -> d
         (participant_code,),
     ).fetchall():
         track = _primary_track(connection, study["id"])
-        completed, total = _track_counts(connection, study["id"], track)
+        completed, stored_total = _track_counts(connection, study["id"], track)
+        total = (
+            len(_track_definition(PRIMARY_EVALUATION_TRACK)["methods"])
+            if BASELINE_INTERACTIONS_READ_ONLY
+            else stored_total
+        )
         existing[study["profile_id"]] = {
             "id": study["id"],
-            "status": "finished" if total > 0 and completed == total else "active",
+            "status": (
+                "finished"
+                if stored_total > 0 and completed == stored_total == total
+                else "active"
+            ),
             "completed_sessions": completed,
             "total_sessions": total,
             "evaluation_track": track,
@@ -1382,6 +1393,17 @@ def profiles_payload(connection: sqlite3.Connection, participant_code: str) -> d
         """,
         (participant_code,),
     ).fetchall()
+    visible_assignments = assignments
+    if BASELINE_INTERACTIONS_READ_ONLY and assignments:
+        current = next(
+            (
+                row
+                for row in assignments
+                if existing.get(row["profile_id"], {}).get("status") != "finished"
+            ),
+            assignments[-1],
+        )
+        visible_assignments = [current]
     participant = connection.execute(
         "SELECT email, name FROM participants WHERE participant_code = ?", (participant_code,)
     ).fetchone()
@@ -1400,7 +1422,7 @@ def profiles_payload(connection: sqlite3.Connection, participant_code: str) -> d
                 existing.get(row["profile_id"]),
                 display_number=int(row["display_order"]),
             )
-            for row in assignments
+            for row in visible_assignments
         ],
         "can_request_next": bool(assignments)
         and _all_assigned_patients_finished(connection, participant_code)
