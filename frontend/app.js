@@ -9,17 +9,18 @@ const storageKeys = {
   token: "cbt-live/token",
   email: "cbt-live/email"
 };
-const incompletePatientWarning = "Your input for this patient is incomplete. Please finish the remaining ablation therapist session(s) and submit their ratings before leaving.";
+const incompletePatientWarning = "Your input for this patient is incomplete. Please finish the remaining therapist session(s) and submit their ratings before leaving.";
 const websiteRefreshRequiredText = "The study website has been updated with new therapist methods.";
 const state = {
   token: sessionStorage.getItem(storageKeys.token) || "",
   email: sessionStorage.getItem(storageKeys.email) || "",
   profiles: [],
+  previousProgress: null,
   canRequestNext: false,
   allPatientsAssigned: false,
   study: null,
-  evaluationTrack: "ablations",
-  ablationIncomplete: false,
+  evaluationTrack: "focused",
+  focusedIncomplete: false,
   view: "login",
   pollTimer: null,
   toastTimer: null,
@@ -53,6 +54,7 @@ const el = {
   signOut: document.getElementById("sign-out-button"),
   home: document.getElementById("home-link"),
   profileGrid: document.getElementById("profile-grid"),
+  taskMessage: document.getElementById("task-message"),
   nextPatientBox: document.getElementById("next-patient-box"),
   nextPatientNote: document.getElementById("next-patient-note"),
   nextPatientButton: document.getElementById("next-patient-button"),
@@ -145,7 +147,8 @@ async function api(path, options = {}) {
 
 async function checkHealth() {
   try {
-    await api("/api/health", { skipAuth: true });
+    const health = await api("/api/health", { skipAuth: true });
+    if (health.status !== "ok") throw new Error("Study server is degraded.");
     setConnection("online", "Server online");
   } catch {
     setConnection("offline", "Server unavailable");
@@ -162,11 +165,12 @@ function signOut() {
   state.token = "";
   state.email = "";
   state.profiles = [];
+  state.previousProgress = null;
   state.canRequestNext = false;
   state.allPatientsAssigned = false;
   state.study = null;
-  state.evaluationTrack = "ablations";
-  state.ablationIncomplete = false;
+  state.evaluationTrack = "focused";
+  state.focusedIncomplete = false;
   state.ratingPanelId = null;
   state.pendingActions.clear();
   sessionStorage.removeItem(storageKeys.token);
@@ -186,7 +190,7 @@ function releaseUnusedPatientOffer() {
 }
 
 function patientIsIncomplete() {
-  return Boolean(state.study && state.ablationIncomplete);
+  return Boolean(state.study && state.focusedIncomplete);
 }
 
 function confirmLeavingIncompletePatient() {
@@ -222,17 +226,17 @@ function currentPanel() {
 }
 
 function trackTitle() {
-  return "Ablation study";
+  return "Additional coverage study";
 }
 
 function adoptStudy(study) {
   state.study = study;
   state.evaluationTrack = study?.evaluation_track || state.evaluationTrack;
-  if (state.evaluationTrack === "ablations") {
-    state.ablationIncomplete = Boolean(
+  if (state.evaluationTrack === "focused") {
+    state.focusedIncomplete = Boolean(
       study
       && study.status !== "finished"
-      && Number(study.completed_sessions || 0) < Number(study.total_sessions || 6)
+      && Number(study.completed_sessions || 0) < Number(study.total_sessions || 4)
     );
   }
 }
@@ -251,13 +255,17 @@ function fillList(node, values) {
 }
 
 function renderProfiles() {
+  const previous = state.previousProgress;
+  el.taskMessage.textContent = previous
+    ? `Thank you for your previous contribution (${previous.completed_sessions} of ${previous.total_sessions} sessions rated). It remains saved. We now need additional coverage for four therapist variants. Role-play the patient shown below and complete all four sessions and CTRS ratings.`
+    : "We need coverage for four therapist variants. Role-play the patient shown below and complete all four sessions and CTRS ratings.";
   el.profileGrid.replaceChildren();
   for (const profile of state.profiles) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "patient-card";
     const completed = profile.study?.completed_sessions || 0;
-    const total = profile.study?.total_sessions || 6;
+    const total = profile.study?.total_sessions || 4;
     const statusText = profile.study?.status === "finished"
       ? "Completed"
       : profile.study
@@ -286,6 +294,7 @@ async function loadProfiles() {
   try {
     const payload = await api("/api/profiles");
     state.profiles = payload.profiles;
+    state.previousProgress = payload.previous_progress || null;
     state.canRequestNext = Boolean(payload.can_request_next);
     state.allPatientsAssigned = Boolean(payload.all_patients_assigned);
     renderProfiles();
@@ -300,6 +309,7 @@ async function requestNextPatient() {
   try {
     const payload = await api("/api/assignments/next", { method: "POST" });
     state.profiles = payload.profiles;
+    state.previousProgress = payload.previous_progress || null;
     state.canRequestNext = Boolean(payload.can_request_next);
     state.allPatientsAssigned = Boolean(payload.all_patients_assigned);
     renderProfiles();
@@ -314,7 +324,7 @@ async function requestNextPatient() {
 async function openPatient(profile) {
   if (patientIsIncomplete() && state.study.profile?.id !== profile.id && !confirmLeavingIncompletePatient()) return;
   try {
-    state.evaluationTrack = "ablations";
+    state.evaluationTrack = "focused";
     const payload = await api("/api/studies", {
       method: "POST",
       body: JSON.stringify({ profile_id: profile.id, evaluation_track: state.evaluationTrack })

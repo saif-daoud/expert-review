@@ -28,13 +28,11 @@ CTRS_KEYS = (
     "application_of_cbt_techniques",
     "homework",
 )
-ABLATION_METHODS = (
-    "topas_expert_components",
+FOCUSED_METHODS = (
     "topas_chatgpt_components",
-    "topas_no_rl",
-    "topas_no_conv_state",
     "topas_full",
-    "theramind",
+    "hiper",
+    "rag",
 )
 
 
@@ -140,7 +138,7 @@ def private_method_order(
         f"{participant_code}|{profile_id}|{evaluation_track}|panel-order".encode("utf-8"),
         hashlib.sha256,
     ).digest()
-    methods = list(ABLATION_METHODS)
+    methods = list(FOCUSED_METHODS)
     random.Random(int.from_bytes(digest, "big")).shuffle(methods)
     return methods
 
@@ -192,7 +190,7 @@ def select_profile(api: StudyApi, requested_id: str | None) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Exercise all six real focused therapist sessions through the public study API."
+        description="Exercise all four real focused therapist sessions through the public study API."
     )
     parser.add_argument("--base-url", required=True)
     parser.add_argument("--access-code")
@@ -202,14 +200,14 @@ def main() -> int:
     )
     parser.add_argument(
         "--email",
-        default=f"ablation-smoke-{int(time.time())}-{uuid.uuid4().hex[:8]}@example.org",
+        default=f"focused-smoke-{int(time.time())}-{uuid.uuid4().hex[:8]}@example.org",
     )
     parser.add_argument(
         "--participant-code",
         help="Compatibility value for an older deployed API that still requires it.",
     )
     parser.add_argument("--profile-id")
-    parser.add_argument("--evaluation-track", default="ablations", choices=("ablations",))
+    parser.add_argument("--evaluation-track", default="focused", choices=("focused",))
     parser.add_argument("--timeout", type=int, default=900)
     parser.add_argument(
         "--patient-message",
@@ -307,7 +305,7 @@ def main() -> int:
             f"/api/studies/{study['id']}/panels/{panel_id}/rating",
             {
                 "scores": {key: 3 for key in CTRS_KEYS},
-                "comments": "Automated live method smoke test; not research data.",
+                "comments": "Automated focused-method smoke test; not research data.",
             },
         )["study"]
         results.append(

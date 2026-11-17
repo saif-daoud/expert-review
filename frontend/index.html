@@ -58,7 +58,7 @@
         </div>
         <div class="task-card">
           <span class="task-number">Your task</span>
-          <p>Role-play the patient using the profile provided. Please focus on the ablation study and complete its therapist sessions and CTRS ratings for the patient.</p>
+          <p id="task-message">Role-play the patient using the profile provided and complete all four therapist sessions and CTRS ratings.</p>
         </div>
         <div class="profile-grid" id="profile-grid"></div>
         <div class="next-patient-box hidden" id="next-patient-box">
@@ -80,10 +80,10 @@
         <section class="evaluation-track-card" aria-labelledby="evaluation-track-title">
           <div>
             <p class="eyebrow">Evaluation set</p>
-            <h2 id="evaluation-track-title">Six therapist variants</h2>
+            <h2 id="evaluation-track-title">Four therapist variants</h2>
             <p>Complete one session and CTRS evaluation with each therapist.</p>
           </div>
-          <span class="evaluation-count" aria-label="Six sessions">6 sessions</span>
+          <span class="evaluation-count" aria-label="Four sessions">4 sessions</span>
         </section>
         <article class="patient-sheet">
           <section class="profile-lead"><h2>Presenting situation</h2><p id="patient-summary"></p></section>
@@ -160,8 +160,8 @@
 
     <div class="toast hidden" id="toast" role="status"></div>
 
-    <script src="./config.js?v=20261112"></script>
-    <script src="./ctrs.js?v=20261112"></script>
-    <script src="./app.js?v=20261112"></script>
+    <script src="./config.js?v=20261117-rag"></script>
+    <script src="./ctrs.js?v=20261117-rag"></script>
+    <script src="./app.js?v=20261117-rag"></script>
   </body>
 </html>

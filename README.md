@@ -1,17 +1,17 @@
 # CBT live interaction study
 
-This package contains the focused six-method therapist study website and its rootless GPU API.
+This package contains the focused four-method therapist study website and its rootless GPU API.
 
 - Every expert uses one shared access code and is identified by their normalized email address.
-- A new expert receives one patient. After completing all six sessions and ratings, they may choose to evaluate another patient.
+- A new expert receives one patient. After completing all four sessions and ratings, they may choose to evaluate another patient.
 - An offered patient is permanently claimed only after the first CTRS rating. An unused offer is released on sign-out/browser close or after its timeout.
 - Patient numbers are account-relative and always begin at `Patient 1`; underlying dataset indices are never displayed.
 - First-time users complete a professional profile; returning users resume under their normalized email address.
-- Each patient starts on a full profile page, followed by six sequential blinded sessions (`Therapist A` through `Therapist F`).
+- Each patient starts on a full profile page, followed by four sequential blinded sessions (`Therapist A` through `Therapist D`).
 - After every session, the expert must submit all 11 CTRS scores before the next therapist unlocks.
-- Leaving an incomplete patient displays a reminder to finish all six focused methods and ratings; all partial work remains saved.
+- Leaving an incomplete patient displays a reminder to finish all four focused methods and ratings; all partial work remains saved.
 - A session ends manually, after 50 therapist-patient turns, or when either speaker gives a simulation-style farewell.
-- All six focused methods use bundled inference code matching the simulation policies, including TheraMind and the TOPAS variants.
+- The active methods are TOPAS with ChatGPT components, Full TOPAS, HiPER, and textbook RAG. Historical methods remain saved but hidden.
 - A single FIFO queue serializes inference across all experts and panels.
 - A session-scoped worker loads only the model needed by the current chat and unloads when the expert leaves, ends it, or does not reply for 60 seconds.
 - New workers use first-fit GPU allocation across GPUs 0–3 using live free-memory checks and method-specific safety thresholds.
@@ -32,10 +32,8 @@ Browser / GitHub Pages
 FastAPI + SQLite + one FIFO generation lane (cbt-live-api)
         |
         +-- first-fit allocator: GPU 0 -> GPU 1 -> GPU 2 -> GPU 3
-              +-- base env: Prompting, ProAct, or TOPAS
-              +-- archer_env: Archer
-              +-- aria_env: ARIA
-              +-- sweet_rl: Sweet-RL
+              +-- base env: TOPAS + ChatGPT components or Full TOPAS
+              +-- private localhost services: HiPER or textbook RAG
 ```
 
 Each session worker is loaded lazily on its first therapist turn and retained while the expert remains active in that
